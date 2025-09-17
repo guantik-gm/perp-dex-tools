@@ -6,27 +6,15 @@ A modular trading bot that supports multiple exchanges including EdgeX and Backp
 
 - **X (Twitter)**: [@yourQuantGuy](https://x.com/yourQuantGuy)
 
-## Referral Links
+## Referral Links (Enjoy fee rebates and benefits)
 
-### EdgeX Exchange
+### EdgeX: [https://pro.edgex.exchange/referral/QUANT](https://pro.edgex.exchange/referral/QUANT)
+- Instant VIP 1 Trading Fees
+- 10% Fee Rebate
+- 10% Bonus Points
 
-Use my referral link to sign up:  
-👉 [https://pro.edgex.exchange/referral/QUANT](https://pro.edgex.exchange/referral/QUANT)
-
-By using my EdgeX referral, you will enjoy the following benefits:
-
-1. **Instant VIP 1 Trading Fees** – get upgraded directly to VIP 1 fee rates.
-2. **10% Fee Rebate** – automatically settled every 24 hours and claimable directly on the EdgeX website.
-   - This rebate is on top of the VIP 1 fee rate, which means your effective trading fee becomes:
-     ```
-     0.013% * 0.9 = 0.0117%
-     ```
-3. **10% Bonus Points** – extra points credited to your account.
-
-### Backpack Exchange
-
-**30% Fee Rebates** – By using my Backpack referral, you will get 30% fee rebates on all your trading fees:
-👉 [https://backpack.exchange/join/quant](https://backpack.exchange/join/quant)
+### Backpack Exchange: [https://backpack.exchange/join/quant](https://backpack.exchange/join/quant)
+By using my Backpack referral, you will get 30% fee rebates on all your trading fees
 
 ## Installation
 

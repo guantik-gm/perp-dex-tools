@@ -1,32 +1,25 @@
+## 🌍 Language / 语言
+
+**English speakers**: Please read README_EN.md for the English version of this documentation.
+
 # 交易机器人
 
 一个支持多个交易所（目前包括 EdgeX 和 Backpack）的模块化交易机器人。该机器人实现了自动下单并在盈利时自动平仓的策略。
+---
 
 ## 关注我
 
 - **X (Twitter)**: [@yourQuantGuy](https://x.com/yourQuantGuy)
 
-## 邀请链接
+## 邀请链接 (获得返佣以及福利)
 
-### EdgeX 交易所
+### EdgeX 交易所: [https://pro.edgex.exchange/referral/QUANT](https://pro.edgex.exchange/referral/QUANT)
+- 即时获得 VIP 1 费率
+- 10% 手续费返佣 (实际费率 0.0117%)
+- 10% 额外奖励积分
 
-使用我的推荐链接注册：  
-👉 [https://pro.edgex.exchange/referral/QUANT](https://pro.edgex.exchange/referral/QUANT)
-
-使用我的 EdgeX 推荐链接，享受以下优惠：
-
-1. **即时 VIP 1 交易费率** – 直接升级到 VIP 1 费率。
-2. **10%手续费返佣** – 每 24 小时自动结算，可直接在 EdgeX 网站上领取。
-   - 此返佣是在 VIP 1 费率基础上的额外优惠，这意味着您的实际交易费率变为：
-     ```
-     0.013% * 0.9 = 0.0117%
-     ```
-3. **10%奖励积分** – 额外积分将记入您的账户。
-
-### Backpack 交易所
-
-**30%手续费返佣** – 使用我的 Backpack 推荐链接，您将获得所有交易费用的 30% 自动返佣：
-👉 [https://backpack.exchange/join/quant](https://backpack.exchange/join/quant)
+### Backpack 交易所: [https://backpack.exchange/join/quant](https://backpack.exchange/join/quant)
+使用我的推荐链接获得 30% 手续费返佣
 
 ## 安装
 
