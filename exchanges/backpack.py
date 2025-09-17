@@ -303,6 +303,10 @@ class BackpackClient(BaseExchangeClient):
 
             if not bids or not asks:
                 return OrderResult(success=False, error_message='No bid/ask data available')
+            
+            # Sort bids and asks
+            bids = sorted(bids, key=lambda x: Decimal(x[0]), reverse=True)  # (highest price first)
+            asks = sorted(asks, key=lambda x: Decimal(x[0]))                # (lowest price first)
 
             # Best bid is the highest price someone is willing to buy at
             best_bid = Decimal(bids[0][0]) if bids and len(bids) > 0 else 0
@@ -377,6 +381,10 @@ class BackpackClient(BaseExchangeClient):
 
             if not bids or not asks:
                 return OrderResult(success=False, error_message='No bid/ask data available')
+
+            # Sort bids and asks
+            bids = sorted(bids, key=lambda x: Decimal(x[0]), reverse=True)  # (highest price first)
+            asks = sorted(asks, key=lambda x: Decimal(x[0]))                # (lowest price first)
 
             # Get best bid and ask prices
             best_bid = Decimal(bids[0][0]) if bids and len(bids) > 0 else 0
