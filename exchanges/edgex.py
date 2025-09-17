@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 from edgex_sdk import Client, OrderSide, WebSocketManager, CancelOrderParams, GetOrderBookDepthParams, GetActiveOrderParams
 
-from .base import BaseExchangeClient, OrderResult, OrderInfo
+from .base import BaseExchangeClient, OrderResult, OrderInfo, query_retry
 from helpers.logger import TradingLogger
 
 
@@ -375,93 +375,85 @@ class EdgeXClient(BaseExchangeClient):
         except Exception as e:
             return OrderResult(success=False, error_message=str(e))
 
+    @query_retry()
     async def get_order_info(self, order_id: str) -> Optional[OrderInfo]:
         """Get order information from EdgeX using official SDK."""
-        try:
-            # Use the newly created get_order_by_id method
-            order_result = await self.client.order.get_order_by_id(order_id_list=[order_id])
+        # Use the newly created get_order_by_id method
+        order_result = await self.client.order.get_order_by_id(order_id_list=[order_id])
 
-            if not order_result or 'data' not in order_result:
-                return None
-
-            # The API returns a list of orders, get the first (and should be only) one
-            order_list = order_result['data']
-            if order_list and len(order_list) > 0:
-                order_data = order_list[0]
-                return OrderInfo(
-                    order_id=order_data.get('id', ''),
-                    side=order_data.get('side', '').lower(),
-                    size=Decimal(order_data.get('size', 0)),
-                    price=Decimal(order_data.get('price', 0)),
-                    status=order_data.get('status', ''),
-                    filled_size=Decimal(order_data.get('cumMatchSize', 0)),
-                    remaining_size=Decimal(order_data.get('size', 0)) - Decimal(order_data.get('cumMatchSize', 0))
-                )
-
+        if not order_result or 'data' not in order_result:
             return None
 
-        except Exception:
-            return None
+        # The API returns a list of orders, get the first (and should be only) one
+        order_list = order_result['data']
+        if order_list and len(order_list) > 0:
+            order_data = order_list[0]
+            return OrderInfo(
+                order_id=order_data.get('id', ''),
+                side=order_data.get('side', '').lower(),
+                size=Decimal(order_data.get('size', 0)),
+                price=Decimal(order_data.get('price', 0)),
+                status=order_data.get('status', ''),
+                filled_size=Decimal(order_data.get('cumMatchSize', 0)),
+                remaining_size=Decimal(order_data.get('size', 0)) - Decimal(order_data.get('cumMatchSize', 0))
+            )
 
+        return None
+
+    @query_retry(default_return=[])
     async def get_active_orders(self, contract_id: str) -> List[OrderInfo]:
         """Get active orders for a contract using official SDK."""
-        try:
-            # Get active orders using official SDK
-            params = GetActiveOrderParams(size="100", offset_data="")
-            active_orders = await self.client.get_active_orders(params)
+        # Get active orders using official SDK
+        params = GetActiveOrderParams(size="100", offset_data="")
+        active_orders = await self.client.get_active_orders(params)
 
-            if not active_orders or 'data' not in active_orders:
-                return []
-
-            # Filter orders for the specific contract and ensure they are dictionaries
-            # The API returns orders under 'dataList' key, not 'orderList'
-            order_list = active_orders['data'].get('dataList', [])
-            contract_orders = []
-
-            for order in order_list:
-                if isinstance(order, dict) and order.get('contractId') == contract_id:
-                    contract_orders.append(OrderInfo(
-                        order_id=order.get('id', ''),
-                        side=order.get('side', '').lower(),
-                        size=Decimal(order.get('size', 0)),
-                        price=Decimal(order.get('price', 0)),
-                        status=order.get('status', ''),
-                        filled_size=Decimal(order.get('cumMatchSize', 0)),
-                        remaining_size=Decimal(order.get('size', 0)) - Decimal(order.get('cumMatchSize', 0))
-                    ))
-
-            return contract_orders
-
-        except Exception:
+        if not active_orders or 'data' not in active_orders:
             return []
 
+        # Filter orders for the specific contract and ensure they are dictionaries
+        # The API returns orders under 'dataList' key, not 'orderList'
+        order_list = active_orders['data'].get('dataList', [])
+        contract_orders = []
+
+        for order in order_list:
+            if isinstance(order, dict) and order.get('contractId') == contract_id:
+                contract_orders.append(OrderInfo(
+                    order_id=order.get('id', ''),
+                    side=order.get('side', '').lower(),
+                    size=Decimal(order.get('size', 0)),
+                    price=Decimal(order.get('price', 0)),
+                    status=order.get('status', ''),
+                    filled_size=Decimal(order.get('cumMatchSize', 0)),
+                    remaining_size=Decimal(order.get('size', 0)) - Decimal(order.get('cumMatchSize', 0))
+                ))
+
+        return contract_orders
+
+    @query_retry(default_return=0)
     async def get_account_positions(self) -> Decimal:
         """Get account positions using official SDK."""
-        try:
-            positions_data = await self.client.get_account_positions()
-            if not positions_data or 'data' not in positions_data:
-                self.logger.log("No positions or failed to get positions", "WARNING")
-                position_amt = 0
-            else:
-                # The API returns positions under data.positionList
-                positions = positions_data.get('data', {}).get('positionList', [])
-                if positions:
-                    # Find position for current contract
-                    position = None
-                    for p in positions:
-                        if isinstance(p, dict) and p.get('contractId') == self.config.contract_id:
-                            position = p
-                            break
+        positions_data = await self.client.get_account_positions()
+        if not positions_data or 'data' not in positions_data:
+            self.logger.log("No positions or failed to get positions", "WARNING")
+            position_amt = 0
+        else:
+            # The API returns positions under data.positionList
+            positions = positions_data.get('data', {}).get('positionList', [])
+            if positions:
+                # Find position for current contract
+                position = None
+                for p in positions:
+                    if isinstance(p, dict) and p.get('contractId') == self.config.contract_id:
+                        position = p
+                        break
 
-                    if position:
-                        position_amt = abs(Decimal(position.get('openSize', 0)))
-                    else:
-                        position_amt = 0
+                if position:
+                    position_amt = abs(Decimal(position.get('openSize', 0)))
                 else:
                     position_amt = 0
-            return position_amt
-        except Exception:
-            return 0
+            else:
+                position_amt = 0
+        return position_amt
 
     async def get_contract_attributes(self) -> Tuple[str, Decimal]:
         """Get contract ID for a ticker."""

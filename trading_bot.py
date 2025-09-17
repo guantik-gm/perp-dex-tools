@@ -2,18 +2,18 @@
 Modular Trading Bot - Supports multiple exchanges
 """
 
+import os
 import time
 import asyncio
 import traceback
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional
-import dotenv
 
 from exchanges import ExchangeFactory
 from helpers import TradingLogger
+from helpers.lark_bot import LarkBot
 
-dotenv.load_dotenv()
 
 
 @dataclass
@@ -171,6 +171,10 @@ class TradingBot:
         else:
             cool_down_time = self.config.wait_time / 4
 
+         # if the program detects active_close_orders during startup, it is necessary to consider cooldown_time
+        if self.last_open_order_time == 0 and len(self.active_close_orders) > 0:
+            self.last_open_order_time = time.time()
+        
         if time.time() - self.last_open_order_time > cool_down_time:
             return 0
         else:
@@ -315,13 +319,19 @@ class TradingBot:
                 self.last_log_time = time.time()
                 # Check for position mismatch
                 if abs(position_amt - active_close_amount) > (2 * self.config.quantity):
-                    self.logger.log("ERROR: Position mismatch detected", "ERROR")
-                    self.logger.log("###### ERROR ###### ERROR ###### ERROR ###### ERROR #####\n", "ERROR")
-                    self.logger.log("Please manually rebalance your position and take-profit orders", "ERROR")
-                    self.logger.log("请手动平衡当前仓位和正在关闭的仓位", "ERROR")
-                    self.logger.log(
-                        f"current position: {position_amt} | active closing amount: {active_close_amount}\n", "ERROR")
-                    self.logger.log("###### ERROR ###### ERROR ###### ERROR ###### ERROR #####", "ERROR")
+                    error_message = f"\n\nERROR: [{self.config.exchange.upper()}_{self.config.ticker.upper()}] Position mismatch detected\n"
+                    error_message += f"###### ERROR ###### ERROR ###### ERROR ###### ERROR #####\n"
+                    error_message += f"Please manually rebalance your position and take-profit orders\n"
+                    error_message += f"请手动平衡当前仓位和正在关闭的仓位\n"
+                    error_message += f"current position: {position_amt} | active closing amount: {active_close_amount}\n"
+                    error_message += f"###### ERROR ###### ERROR ###### ERROR ###### ERROR #####\n"
+                    self.logger.log(error_message, "ERROR")
+
+                    lark_token = os.getenv("LARK_TOKEN")
+                    if lark_token:
+                        async with LarkBot(lark_token) as bot:
+                            await bot.send_text(error_message.lstrip())
+
                     if not self.shutdown_requested:
                         self.shutdown_requested = True
 

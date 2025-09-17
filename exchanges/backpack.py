@@ -16,7 +16,7 @@ from bpx.public import Public
 from bpx.account import Account
 from bpx.constants.enums import OrderTypeEnum, TimeInForceEnum
 
-from .base import BaseExchangeClient, OrderResult, OrderInfo
+from .base import BaseExchangeClient, OrderResult, OrderInfo, query_retry
 from helpers.logger import TradingLogger
 
 
@@ -458,78 +458,70 @@ class BackpackClient(BaseExchangeClient):
         except Exception as e:
             return OrderResult(success=False, error_message=str(e))
 
+    @query_retry()
     async def get_order_info(self, order_id: str) -> Optional[OrderInfo]:
         """Get order information from Backpack using official SDK."""
-        try:
-            # Get order information using Backpack SDK
-            order_result = self.account_client.get_open_order(
-                symbol=self.config.contract_id,
-                order_id=order_id
-            )
+        # Get order information using Backpack SDK
+        order_result = self.account_client.get_open_order(
+            symbol=self.config.contract_id,
+            order_id=order_id
+        )
 
-            if not order_result:
-                return None
-
-            # Return the order data as OrderInfo
-            return OrderInfo(
-                order_id=order_result.get('id', ''),
-                side=order_result.get('side', '').lower(),
-                size=Decimal(order_result.get('quantity', 0)),
-                price=Decimal(order_result.get('price', 0)),
-                status=order_result.get('status', ''),
-                filled_size=Decimal(order_result.get('executedQuantity', 0)),
-                remaining_size=Decimal(order_result.get('quantity', 0)) - Decimal(order_result.get('executedQuantity', 0))
-            )
-
-        except Exception:
+        if not order_result:
             return None
 
+        # Return the order data as OrderInfo
+        return OrderInfo(
+            order_id=order_result.get('id', ''),
+            side=order_result.get('side', '').lower(),
+            size=Decimal(order_result.get('quantity', 0)),
+            price=Decimal(order_result.get('price', 0)),
+            status=order_result.get('status', ''),
+            filled_size=Decimal(order_result.get('executedQuantity', 0)),
+            remaining_size=Decimal(order_result.get('quantity', 0)) - Decimal(order_result.get('executedQuantity', 0))
+        )
+
+    @query_retry(default_return=[])
     async def get_active_orders(self, contract_id: str) -> List[OrderInfo]:
         """Get active orders for a contract using official SDK."""
-        try:
-            # Get active orders using Backpack SDK
-            active_orders = self.account_client.get_open_orders(symbol=contract_id)
+        # Get active orders using Backpack SDK
+        active_orders = self.account_client.get_open_orders(symbol=contract_id)
 
-            if not active_orders:
-                return []
-
-            # Return the orders list as OrderInfo objects
-            order_list = active_orders if isinstance(active_orders, list) else active_orders.get('orders', [])
-            orders = []
-
-            for order in order_list:
-                if isinstance(order, dict):
-                    if order.get('side', '') == 'Bid':
-                        side = 'buy'
-                    elif order.get('side', '') == 'Ask':
-                        side = 'sell'
-                    orders.append(OrderInfo(
-                        order_id=order.get('id', ''),
-                        side=side,
-                        size=Decimal(order.get('quantity', 0)),
-                        price=Decimal(order.get('price', 0)),
-                        status=order.get('status', ''),
-                        filled_size=Decimal(order.get('executedQuantity', 0)),
-                        remaining_size=Decimal(order.get('quantity', 0)) - Decimal(order.get('executedQuantity', 0))
-                    ))
-
-            return orders
-
-        except Exception:
+        if not active_orders:
             return []
 
+        # Return the orders list as OrderInfo objects
+        order_list = active_orders if isinstance(active_orders, list) else active_orders.get('orders', [])
+        orders = []
+
+        for order in order_list:
+            if isinstance(order, dict):
+                if order.get('side', '') == 'Bid':
+                    side = 'buy'
+                elif order.get('side', '') == 'Ask':
+                    side = 'sell'
+                orders.append(OrderInfo(
+                    order_id=order.get('id', ''),
+                    side=side,
+                    size=Decimal(order.get('quantity', 0)),
+                    price=Decimal(order.get('price', 0)),
+                    status=order.get('status', ''),
+                    filled_size=Decimal(order.get('executedQuantity', 0)),
+                    remaining_size=Decimal(order.get('quantity', 0)) - Decimal(order.get('executedQuantity', 0))
+                ))
+
+        return orders
+
+    @query_retry(default_return=0)
     async def get_account_positions(self) -> Decimal:
         """Get account positions using official SDK."""
-        try:
-            positions_data = self.account_client.get_open_positions()
-            position_amt = 0
-            for position in positions_data:
-                if position.get('symbol', '') == self.config.contract_id:
-                    position_amt = abs(Decimal(position.get('netQuantity', 0)))
-                    break
-            return position_amt
-        except Exception:
-            return 0
+        positions_data = self.account_client.get_open_positions()
+        position_amt = 0
+        for position in positions_data:
+            if position.get('symbol', '') == self.config.contract_id:
+                position_amt = abs(Decimal(position.get('netQuantity', 0)))
+                break
+        return position_amt
 
     async def get_contract_attributes(self) -> Tuple[str, Decimal]:
         """Get contract ID for a ticker."""

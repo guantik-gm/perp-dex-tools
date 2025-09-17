@@ -5,6 +5,9 @@ Modular Trading Bot - Supports multiple exchanges
 
 import argparse
 import asyncio
+from pathlib import Path
+import sys
+import dotenv
 from decimal import Decimal
 from trading_bot import TradingBot, TradingConfig
 from exchanges import ExchangeFactory
@@ -33,6 +36,8 @@ def parse_arguments():
                         help='Maximum number of active orders (default: 40)')
     parser.add_argument('--wait-time', type=int, default=450,
                         help='Wait time between orders in seconds (default: 450)')
+    parser.add_argument( "--env-file",type=str, default=".env",
+                        help=".env file path (default: .env)")
 
     return parser.parse_args()
 
@@ -40,6 +45,11 @@ def parse_arguments():
 async def main():
     """Main entry point."""
     args = parse_arguments()
+    env_path = Path(args.env_file)
+    if not env_path.exists():
+        print(f"Env file not find: {env_path.resolve()}")
+        sys.exit(1)
+    dotenv.load_dotenv(args.env_file)
 
     # Create configuration
     config = TradingConfig(

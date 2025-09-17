@@ -70,16 +70,17 @@ class TradingLogger:
 
     def log(self, message: str, level: str = "INFO"):
         """Log a message with the specified level."""
+        formatted_message = f"[{self.exchange.upper()}_{self.ticker.upper()}] {message}"
         if level.upper() == "DEBUG":
-            self.logger.debug(message)
+            self.logger.debug(formatted_message)
         elif level.upper() == "INFO":
-            self.logger.info(message)
+            self.logger.info(formatted_message)
         elif level.upper() == "WARNING":
-            self.logger.warning(message)
+            self.logger.warning(formatted_message)
         elif level.upper() == "ERROR":
-            self.logger.error(message)
+            self.logger.error(formatted_message)
         else:
-            self.logger.info(message)
+            self.logger.info(formatted_message)
 
     def log_transaction(self, order_id: str, side: str, quantity: Decimal, price: Decimal, status: str):
         """Log a transaction to CSV file."""
