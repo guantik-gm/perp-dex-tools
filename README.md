@@ -3,8 +3,8 @@
 **English speakers**: Please read README_EN.md for the English version of this documentation.
 
 # 交易机器人
-
 一个支持多个交易所（目前包括 EdgeX 和 Backpack）的模块化交易机器人。该机器人实现了自动下单并在盈利时自动平仓的策略。
+
 ---
 
 ## 关注我
