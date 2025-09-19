@@ -10,11 +10,6 @@ import traceback
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Optional, Tuple
 from starknet_py.common import int_from_hex
-from paradex_py import Paradex
-from paradex_py.environment import Environment, TESTNET, PROD
-from paradex_py.common.order import Order, OrderType, OrderSide, OrderStatus
-from paradex_py.api.ws_client import ParadexWebsocketChannel
-# from paradex_py.common.console_logging import console_logger  # Disabled to turn off native logging
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from .base import BaseExchangeClient, OrderResult, OrderInfo
@@ -53,15 +48,22 @@ def patch_paradex_http_client():
         # Paradex SDK not available, skip patching
         pass
 
-# Apply the patch when this module is imported
-patch_paradex_http_client()
-
 
 class ParadexClient(BaseExchangeClient):
     """Simplified Paradex exchange client - L2 credentials only."""
 
     def __init__(self, config: Dict[str, Any]):
         """Initialize Paradex client with L2 credentials only."""
+        # Import paradex_py modules only when this class is instantiated
+        from paradex_py import Paradex
+        from paradex_py.environment import Environment, TESTNET, PROD
+        from paradex_py.common.order import Order, OrderType, OrderSide, OrderStatus
+        from paradex_py.api.ws_client import ParadexWebsocketChannel
+        # from paradex_py.common.console_logging import console_logger  # Disabled to turn off native logging
+        
+        # Apply the patch when this class is instantiated
+        patch_paradex_http_client()
+        
         # Set config first
         self.config = config
         
@@ -110,6 +112,9 @@ class ParadexClient(BaseExchangeClient):
     def _initialize_paradex_client(self) -> None:
         """Initialize the Paradex client with L2 credentials only."""
         try:
+            # Import paradex_py modules locally
+            from paradex_py import Paradex
+            
             # Initialize Paradex client without credentials first
             self.paradex = Paradex(
                 env=self.env,
@@ -168,6 +173,8 @@ class ParadexClient(BaseExchangeClient):
 
         async def order_update_handler(ws_channel, message):
             """Handle order updates from WebSocket."""
+            from paradex_py.api.ws_client import ParadexWebsocketChannel
+            
             params = message.get("params", {})
             data = params.get("data", {})
 
@@ -234,6 +241,8 @@ class ParadexClient(BaseExchangeClient):
             self.logger.log("WebSocket connected for order monitoring", "INFO")
 
         # Subscribe to orders channel for the specific market
+        from paradex_py.api.ws_client import ParadexWebsocketChannel
+        
         contract_id = self.config.contract_id
         try:
             await self.paradex.ws_client.subscribe(
@@ -281,7 +290,7 @@ class ParadexClient(BaseExchangeClient):
         retry=retry_if_exception_type(Exception),
         reraise=True
     )
-    def _submit_order_with_retry(self, order: Order) -> OrderResult:
+    def _submit_order_with_retry(self, order) -> OrderResult:
         """Submit an order with Paradex using official SDK."""
         # Submit order using official SDK
         order_result = self.paradex.api_client.submit_order(order)
@@ -296,6 +305,7 @@ class ParadexClient(BaseExchangeClient):
     async def place_post_only_order(self, contract_id: str, quantity: Decimal, price: Decimal,
                                     side: str) -> OrderResult:
         """Place a post only order with Paradex using official SDK."""
+        from paradex_py.common.order import Order, OrderType, OrderSide, OrderStatus
 
         # Create order using Paradex SDK
         order = Order(
@@ -347,6 +357,8 @@ class ParadexClient(BaseExchangeClient):
             best_bid, best_ask = await self.fetch_bbo_prices(contract_id)
             
             # Determine order side and price
+            from paradex_py.common.order import OrderSide
+            
             if direction == 'buy':
                 # For buy orders, place slightly below best ask to ensure execution
                 order_price = best_ask - self.config.tick_size
@@ -419,6 +431,7 @@ class ParadexClient(BaseExchangeClient):
             best_bid, best_ask = await self.fetch_bbo_prices(contract_id)
 
             # Convert side string to OrderSide enum
+            from paradex_py.common.order import OrderSide
             order_side = OrderSide.Buy if side.lower() == 'buy' else OrderSide.Sell
 
             # Adjust order price based on market conditions and side
