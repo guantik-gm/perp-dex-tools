@@ -134,8 +134,8 @@ python runbot.py --exchange backpack --ticker ETH --quantity 0.1 --take-profit 0
 
 #### Backpack Configuration
 
-- `BACKPACK_PUBLIC_KEY`: Your Backpack public key
-- `BACKPACK_SECRET_KEY`: Your Backpack secret key
+- `BACKPACK_PUBLIC_KEY`: Your Backpack API key
+- `BACKPACK_SECRET_KEY`: Your Backpack API Secret
 
 #### Paradex Configuration
 
@@ -154,6 +154,9 @@ python runbot.py --exchange backpack --ticker ETH --quantity 0.1 --take-profit 0
 - `--grid-step`: Minimum distance in percentage to the next close order price (default: -100, means no restriction)
 
 ## Trading Strategy
+
+**Important Notice**: Everyone must first understand the logic and risks of this script so you can set parameters that are more suitable for yourself, or you might think this is not a good strategy and don't want to use it at all. As I mentioned on Twitter, I didn't write these scripts for sharing purposes, but because I'm actually using this script myself, so I wrote it, and then shared it.
+This script mainly focuses on long-term wear and tear. As long as the script continues to place orders, if the price reaches your highest trapped point after a month, then all your trading volume for that month will be zero-wear. Therefore, I believe that setting `--quantity` and `--wait-time` too small is not a good long-term strategy, but it is indeed suitable for short-term high-intensity volume trading. I usually use quantity between 40-60 and wait-time between 450-650 to ensure that even if the market goes against your judgment, the script can still place orders continuously and stably until the price returns to your entry point, achieving zero-wear volume trading.
 
 The bot implements a simple strategy:
 

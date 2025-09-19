@@ -137,8 +137,8 @@ python runbot.py --exchange backpack --ticker ETH --quantity 0.1 --take-profit 0
 
 #### Backpack 配置
 
-- `BACKPACK_PUBLIC_KEY`: 您的 Backpack 公钥
-- `BACKPACK_SECRET_KEY`: 您的 Backpack 私钥
+- `BACKPACK_PUBLIC_KEY`: 您的 Backpack API Key
+- `BACKPACK_SECRET_KEY`: 您的 Backpack API Secret
 
 #### Paradex 配置
 
@@ -157,6 +157,9 @@ python runbot.py --exchange backpack --ticker ETH --quantity 0.1 --take-profit 0
 - `--grid-step`: 与下一个平仓订单价格的最小距离百分比（默认：-100，表示无限制）
 
 ## 交易策略
+
+**重要提醒**：大家一定要先理解了这个脚本的逻辑和风险，这样你就能设置更适合你自己的参数，或者你也可能觉得这不是一个好策略，根本不想用这个策略来刷交易量。我在推特也说过，我不是为了分享而写这些脚本，而是我真的在用这个脚本，所以才写了，然后才顺便分享出来。
+这个脚本主要还是要看长期下来的磨损，只要脚本持续开单，如果一个月后价格到你被套的最高点，那么你这一个月的交易量就都是零磨损的了。所以我认为如果把`--quantity`和`--wait-time`设置的太小，并不是一个好的长期的策略，但确实适合短期内高强度冲交易量。我自己一般用40到60的quantity，450到650的wait-time，以此来保证即使市场和你的判断想法，脚本依然能够持续稳定地下单，直到价格回到你的开单点，实现零磨损刷了交易量。
 
 该机器人实现了简单的交易策略：
 

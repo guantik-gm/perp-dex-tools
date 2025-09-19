@@ -19,8 +19,8 @@ EDGEX_WS_URL=wss://quote.edgex.exchange
 
 # Backpack Account Credentials (REQUIRED for API access)
 # Find these in your Backpack account under "API Keys" or "Account Settings"
-BACKPACK_PUBLIC_KEY=your_public_key_here
-BACKPACK_SECRET_KEY=your_secret_key_here
+BACKPACK_PUBLIC_KEY=your_api_key
+BACKPACK_SECRET_KEY=your_api_secret
 
 # Paradex Configuration
 PARADEX_L2_ADDRESS=your_generated_l2_address_here
