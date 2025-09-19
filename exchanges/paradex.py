@@ -397,6 +397,15 @@ class ParadexClient(BaseExchangeClient):
                 price=order_price,
                 status=order_status
             )
+        elif order_status == 'CLOSED' and remaining_size == 0:
+            return OrderResult(
+                success=True,
+                order_id=order_id,
+                side=direction,
+                size=quantity,
+                price=order_price,
+                status=order_status
+            )
         else:
             raise Exception(f"[OPEN] [{order_id}] Unexpected order status: {order_status}")
 
