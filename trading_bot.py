@@ -29,8 +29,7 @@ class TradingConfig:
     exchange: str
     grid_step: Decimal
     stop_price: Decimal
-    low_price: Decimal
-    high_price: Decimal
+    pause_price: Decimal
 
     @property
     def close_order_side(self) -> str:
