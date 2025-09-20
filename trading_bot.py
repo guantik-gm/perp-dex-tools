@@ -320,8 +320,8 @@ class TradingBot:
                     if isinstance(order, dict)
                 )
 
-                self.logger.log(f"Current Position: {position_amt} | Active closing amount: {active_close_amount}, "
-                                f"quantity: {len(self.active_close_orders)}")
+                self.logger.log(f"Current Position: {position_amt} | Active closing amount: {active_close_amount} | "
+                                f"Order quantity: {len(self.active_close_orders)}")
                 self.last_log_time = time.time()
                 # Check for position mismatch
                 if abs(position_amt - active_close_amount) > (2 * self.config.quantity):
@@ -330,7 +330,7 @@ class TradingBot:
                     error_message += "###### ERROR ###### ERROR ###### ERROR ###### ERROR #####\n"
                     error_message += "Please manually rebalance your position and take-profit orders\n"
                     error_message += "请手动平衡当前仓位和正在关闭的仓位\n"
-                    error_message += f"current position: {position_amt} | active closing amount: {active_close_amount}, "f"quantity: {len(self.active_close_orders)}\n"
+                    error_message += f"current position: {position_amt} | active closing amount: {active_close_amount} | "f"Order quantity: {len(self.active_close_orders)}\n"
                     error_message += "###### ERROR ###### ERROR ###### ERROR ###### ERROR #####\n"
                     self.logger.log(error_message, "ERROR")
 
@@ -417,6 +417,21 @@ class TradingBot:
         """Main trading loop."""
         try:
             self.config.contract_id, self.config.tick_size = await self.exchange_client.get_contract_attributes()
+
+            # Log current TradingConfig
+            self.logger.log("=== Trading Configuration ===", "INFO")
+            self.logger.log(f"Ticker: {self.config.ticker}", "INFO")
+            self.logger.log(f"Contract ID: {self.config.contract_id}", "INFO")
+            self.logger.log(f"Quantity: {self.config.quantity}", "INFO")
+            self.logger.log(f"Take Profit: {self.config.take_profit}%", "INFO")
+            self.logger.log(f"Direction: {self.config.direction}", "INFO")
+            self.logger.log(f"Max Orders: {self.config.max_orders}", "INFO")
+            self.logger.log(f"Wait Time: {self.config.wait_time}s", "INFO")
+            self.logger.log(f"Exchange: {self.config.exchange}", "INFO")
+            self.logger.log(f"Grid Step: {self.config.grid_step}%", "INFO")
+            self.logger.log(f"Stop Price: {self.config.stop_price}", "INFO")
+            self.logger.log(f"Pause Price: {self.config.pause_price}", "INFO")
+            self.logger.log("=============================", "INFO")
 
             # Capture the running event loop for thread-safe callbacks
             self.loop = asyncio.get_running_loop()
