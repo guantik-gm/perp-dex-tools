@@ -7,7 +7,6 @@ import asyncio
 import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Optional, Tuple
-from starknet_py.common import int_from_hex
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from .base import BaseExchangeClient, OrderResult, OrderInfo
@@ -86,6 +85,7 @@ class ParadexClient(BaseExchangeClient):
 
         # Convert L2 private key from hex to int
         try:
+            from starknet_py.common import int_from_hex
             self.l2_private_key = int_from_hex(self.l2_private_key_hex)
         except Exception as e:
             raise ValueError(f"Invalid L2 private key format: {e}")
