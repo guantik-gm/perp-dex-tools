@@ -202,8 +202,9 @@ class TradingBot:
                 self.logger.log(f"Failed to place order: {order_result.error_message}", "ERROR")
                 return False
 
-            # Wait for fill or timeout
-            if not self.order_filled_event.is_set():
+            if order_result.status == 'FILLED':
+                return await self._handle_order_result(order_result)
+            elif not self.order_filled_event.is_set():
                 try:
                     await asyncio.wait_for(self.order_filled_event.wait(), timeout=10)
                 except asyncio.TimeoutError:
@@ -222,7 +223,7 @@ class TradingBot:
         order_id = order_result.order_id
         filled_price = order_result.price
 
-        if self.order_filled_event.is_set():
+        if self.order_filled_event.is_set() or order_result.status == 'FILLED':
             self.last_open_order_time = time.time()
             # Place close order
             close_side = self.config.close_order_side
