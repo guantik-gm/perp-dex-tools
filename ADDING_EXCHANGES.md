@@ -4,7 +4,7 @@ This document explains how to add support for new exchanges to the modular tradi
 
 ## Overview
 
-The trading bot has been modularized to support multiple exchanges through a plugin-like architecture. Each exchange is implemented as a separate client that inherits from `BaseExchangeClient`. The bot currently supports EdgeX, Backpack, and Paradex exchanges.
+The trading bot has been modularized to support multiple exchanges through a plugin-like architecture. Each exchange is implemented as a separate client that inherits from `BaseExchangeClient`. The bot currently supports EdgeX, Backpack, Paradex, and GRVT exchanges.
 
 ## Architecture
 
@@ -15,6 +15,7 @@ exchanges/
 ├── edgex.py             # EdgeX exchange implementation
 ├── backpack.py          # Backpack exchange implementation
 ├── paradex.py           # Paradex exchange implementation
+├── grvt.py              # GRVT exchange implementation
 ├── factory.py           # Exchange factory for dynamic selection
 └── your_exchange.py     # Your new exchange implementation
 ```
@@ -240,6 +241,7 @@ class ExchangeFactory:
         'edgex': EdgeXClient,
         'backpack': BackpackClient,
         'paradex': ParadexClient,
+        'grvt': GrvtClient,
         'your_exchange': YourExchangeClient,  # Add this line
     }
 ```
@@ -251,7 +253,7 @@ Add your exchange to `exchanges/__init__.py`:
 ```python
 from .your_exchange import YourExchangeClient
 
-__all__ = ['BaseExchangeClient', 'EdgeXClient', 'BackpackClient', 'ParadexClient', 'YourExchangeClient', 'ExchangeFactory']
+__all__ = ['BaseExchangeClient', 'EdgeXClient', 'BackpackClient', 'ParadexClient', 'GrvtClient', 'YourExchangeClient', 'ExchangeFactory']
 ```
 
 ### 4. Test Your Implementation
@@ -359,6 +361,13 @@ Each exchange requires specific environment variables. Here are the current impl
 - `PARADEX_L2_ADDRESS` - Your L2 address (optional)
 - `PARADEX_ENVIRONMENT` - Environment (prod/testnet/nightly, defaults to prod)
 
+### GRVT
+
+- `GRVT_TRADING_ACCOUNT_ID` - Your GRVT trading account ID
+- `GRVT_PRIVATE_KEY` - Your GRVT private key
+- `GRVT_API_KEY` - Your GRVT API key
+- `GRVT_ENVIRONMENT` - Environment (prod/testnet/staging/dev, defaults to prod)
+
 ## Usage
 
 Once implemented, users can select your exchange:
@@ -402,6 +411,13 @@ python runbot.py --exchange your_exchange --ticker BTC --quantity 0.01 --directi
 - L2 credentials only (no L1 private key required)
 - WebSocket subscription for order updates
 - Supports StarkNet-based trading
+
+### GRVT
+
+- Uses official GRVT SDK (grvt-pysdk)
+- REST API and WebSocket support
+- Private key authentication
+- Supports perpetual futures trading
 
 ## Example: Binance Futures
 

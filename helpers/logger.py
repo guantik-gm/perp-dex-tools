@@ -40,6 +40,10 @@ class TradingLogger:
         logger = logging.getLogger(f"trading_bot_{self.exchange}_{self.ticker}")
         logger.setLevel(logging.INFO)
 
+        # Prevent propagation to root logger to avoid duplicate output
+        # This is especially important for GRVT which adds a root logger handler
+        logger.propagate = False
+
         # Prevent duplicate handlers
         if logger.handlers:
             return logger
