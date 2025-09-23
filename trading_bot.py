@@ -247,7 +247,7 @@ class TradingBot:
         else:
             self.order_canceled_event.clear()
             # Cancel the order if it's still open
-            self.logger.log(f"[OPEN] [{order_id}] Order time out, trying to cancel order", "INFO")
+            self.logger.log(f"[OPEN] [{order_id}] Cancelling order and placing a new order", "INFO")
             try:
                 cancel_result = await self.exchange_client.cancel_order(order_id)
                 if not cancel_result.success:

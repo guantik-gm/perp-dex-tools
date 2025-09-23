@@ -523,7 +523,7 @@ class AsterClient(BaseExchangeClient):
                 if order_info is not None:
                     order_status = order_info.status
 
-            if order_status == 'NEW':
+            if order_status in ['NEW', 'PARTIALLY_FILLED']:
                 return OrderResult(success=True, order_id=order_id, side=direction, size=quantity, price=price, status='OPEN')
             elif order_status == 'FILLED':
                 return OrderResult(success=True, order_id=order_id, side=direction, size=quantity, price=price, status='FILLED')
@@ -600,7 +600,7 @@ class AsterClient(BaseExchangeClient):
                 if order_info is not None:
                     order_status = order_info.status
 
-            if order_status == 'NEW':
+            if order_status in ['NEW', 'PARTIALLY_FILLED']:
                 return OrderResult(success=True, order_id=order_id, side=order_side.lower(),
                                    size=quantity, price=adjusted_price, status='OPEN')
             elif order_status == 'FILLED':
@@ -657,7 +657,7 @@ class AsterClient(BaseExchangeClient):
             orders.append(OrderInfo(
                 order_id=str(order['orderId']),
                 side=order.get('side', '').lower(),
-                size=Decimal(order.get('origQty', 0)),
+                size=Decimal(order.get('origQty', 0)) - Decimal(order.get('executedQty', 0)),
                 price=Decimal(order.get('price', 0)),
                 status=order.get('status', ''),
                 filled_size=Decimal(order.get('executedQty', 0)),
