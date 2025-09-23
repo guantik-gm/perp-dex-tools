@@ -688,7 +688,7 @@ class AsterClient(BaseExchangeClient):
         try:
             result = await self._make_request('GET', '/fapi/v1/exchangeInfo')
 
-            for symbol_info in result.get('symbols', []):
+            for symbol_info in result['symbols']:
                 if (symbol_info.get('status') == 'TRADING' and
                         symbol_info.get('baseAsset') == ticker and
                         symbol_info.get('quoteAsset') == 'USDT'):
@@ -698,7 +698,7 @@ class AsterClient(BaseExchangeClient):
                     # Get tick size from filters
                     for filter_info in symbol_info.get('filters', []):
                         if filter_info.get('filterType') == 'PRICE_FILTER':
-                            self.config.tick_size = Decimal(filter_info.get('tickSize', 0))
+                            self.config.tick_size = Decimal(filter_info['tickSize'].strip('0'))
                             break
 
                     # Get minimum quantity
