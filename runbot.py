@@ -46,7 +46,7 @@ def parse_arguments():
     parser.add_argument('--pause-price', type=Decimal, default=-1,
                         help='Pause trading and wait. Buy: pause if price >= pause-price.'
                         'Sell: pause if price <= pause-price. (default: -1, no pause)')
-    parser.add_argument('--aster-boost', type=bool, default=False,
+    parser.add_argument('--aster-boost', action='store_true',
                         help='Use the Boost mode for volume boosting')
 
     return parser.parse_args()
