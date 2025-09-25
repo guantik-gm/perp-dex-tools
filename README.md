@@ -24,7 +24,7 @@
 
 #### Aster 交易所: [https://www.asterdex.com/zh-CN/referral/5191B1](https://www.asterdex.com/zh-CN/referral/5191B1)
 
-使用我的推荐链接获得 30%手续费返佣以及积分加成
+使用我的推荐链接获得 30% 手续费返佣以及积分加成
 
 ## 安装
 
@@ -214,6 +214,7 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 - `--stop-price`: 当 `direction` 是 'buy' 时，price >= stop-price 停止交易并退出程序；'sell' 逻辑相反（默认：-1，表示不会因为价格原因停止交易）
 - `--pause-price`: 当 `direction` 是 'buy' 时，price >= pause-price 停止交易并退出程序；'sell' 逻辑相反（默认：-1，表示不会因为价格原因停止交易）
 - `--aster-boost`: 启用 Aster 交易所的 Boost 模式进行交易量提升（仅适用于 aster 交易所）
+  `--aster-boost` 的下单逻辑：下 maker 单开仓，成交后立即用 taker 单关仓，以此循环。磨损为一单 maker，一单 taker 的手续费，以及滑点。
 
 ## 日志记录
 
@@ -251,7 +252,9 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 详情请参阅[LICENSE](LICENSE)文件。
+本项目采用非商业许可证 - 详情请参阅[LICENSE](LICENSE)文件。
+
+**重要提醒**：本软件仅供个人学习和研究使用，严禁用于任何商业用途。如需商业使用，请联系作者获取商业许可证。
 
 ## 免责声明
 

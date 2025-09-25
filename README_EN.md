@@ -246,7 +246,9 @@ Configure the account in the `.env` file, then use different `--ticker` paramete
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under a Non-Commercial License - see the [LICENSE](LICENSE) file for details.
+
+**Important Notice**: This software is for personal learning and research purposes only. Commercial use is strictly prohibited. For commercial use, please contact the author for a commercial license.
 
 ## Disclaimer
 
