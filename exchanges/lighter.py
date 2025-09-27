@@ -5,6 +5,7 @@ Lighter exchange client implementation.
 import os
 import asyncio
 import time
+import logging
 from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -17,6 +18,13 @@ from lighter import SignerClient, ApiClient, Configuration
 
 # Import custom WebSocket implementation
 from .lighter_custom_websocket import LighterCustomWebSocketManager
+
+# Suppress Lighter SDK debug logs
+logging.getLogger('lighter').setLevel(logging.WARNING)
+# Also suppress root logger DEBUG messages that might be coming from Lighter SDK
+root_logger = logging.getLogger()
+if root_logger.level == logging.DEBUG:
+    root_logger.setLevel(logging.WARNING)
 
 
 class LighterClient(BaseExchangeClient):
@@ -170,20 +178,30 @@ class LighterClient(BaseExchangeClient):
         else:
             order_type = "OPEN"
 
+        order_id = order_data['order_index']
+        status = order_data['status'].upper()
+        filled_size = Decimal(order_data['filled_base_amount'])
+        size = Decimal(order_data['initial_base_amount'])
+        price = Decimal(order_data['price'])
+        remaining_size = Decimal(order_data['remaining_base_amount'])
+
         self.logger.log(f"[{order_type}] [{order_data['order_index']}] {order_data['status'].upper()} "
                         f"{order_data['initial_base_amount']} @ {order_data['price']}", "INFO")
         if order_data['client_order_index'] == self.current_order_client_id:
             current_order = OrderInfo(
-                order_id=order_data['order_index'],
+                order_id=order_id,
                 side=side,
-                size=Decimal(order_data['initial_base_amount']),
-                price=Decimal(order_data['price']),
-                status=order_data['status'].upper(),
-                filled_size=Decimal(order_data['filled_base_amount']),
-                remaining_size=Decimal(order_data['remaining_base_amount']),
+                size=size,
+                price=price,
+                status=status,
+                filled_size=filled_size,
+                remaining_size=remaining_size,
                 cancel_reason=''
             )
             self.current_order = current_order
+
+        if status in ['FILLED', 'CANCELED']:
+            self.logger.log_transaction(order_id, side, filled_size, price, status)
 
     @query_retry()
     async def fetch_bbo_prices(self, contract_id: str) -> Tuple[Decimal, Decimal]:
