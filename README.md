@@ -54,6 +54,15 @@
    ```
 
 3. **安装依赖**：
+   首先确保你目前不在任何虚拟环境中：
+   ```bash
+   deactivate
+   ```
+
+   激活虚拟环境（每次使用脚本时，都需要激活虚拟环境）：
+   ```bash
+   source env/bin/activate  # Windows: env\Scripts\activate
+   ```
 
    ```bash
    pip install -r requirements.txt
