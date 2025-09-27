@@ -243,6 +243,17 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 - `LIGHTER_ACCOUNT_INDEX`: Lighter 账户索引
 - `LIGHTER_API_KEY_INDEX`: Lighter API 密钥索引
 
+**获取 LIGHTER_ACCOUNT_INDEX 的方法**：
+
+1. 在下面的网址最后加上你的钱包地址：
+   ```
+   https://mainnet.zklighter.elliot.ai/api/v1/account?by=l1_address&value=
+   ```
+
+2. 在浏览器中打开这个网址
+
+3. 在结果中搜索 "account_index" - 如果你有子账户，会有多个 account_index，短的那个是你主账户的，长的是你的子账户。
+
 ### 命令行参数
 
 - `--exchange`: 使用的交易所：'edgex'、'backpack'、'paradex'、'aster'或'lighter'（默认：edgex）

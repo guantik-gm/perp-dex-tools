@@ -230,6 +230,17 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 - `LIGHTER_ACCOUNT_INDEX`: Lighter account index
 - `LIGHTER_API_KEY_INDEX`: Lighter API key index
 
+**How to get LIGHTER_ACCOUNT_INDEX**:
+
+1. Add your wallet address to the end of the following URL:
+   ```
+   https://mainnet.zklighter.elliot.ai/api/v1/account?by=l1_address&value=
+   ```
+
+2. Open this URL in your browser
+
+3. Search for "account_index" in the results - if you have subaccounts, there will be multiple account_index values. The shorter one is your main account, and the longer ones are your subaccounts.
+
 ### Command Line Arguments
 
 - `--exchange`: Exchange to use: 'edgex', 'backpack', 'paradex', 'aster', or 'lighter' (default: edgex)
