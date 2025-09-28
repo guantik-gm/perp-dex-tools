@@ -161,6 +161,22 @@ class EdgeXClient(BaseExchangeClient):
         best_ask = Decimal(asks[0]['price']) if asks and len(asks) > 0 else 0
         return best_bid, best_ask
 
+    async def get_order_price(self, direction: str) -> Decimal:
+        """Get the price of an order with EdgeX using official SDK."""
+        best_bid, best_ask = await self.fetch_bbo_prices(self.config.contract_id)
+        if best_bid <= 0 or best_ask <= 0:
+            self.logger.log("Invalid bid/ask prices", "ERROR")
+            raise ValueError("Invalid bid/ask prices")
+
+
+        if direction == 'buy':
+            # For buy orders, place slightly below best ask to ensure execution
+            order_price = best_ask - self.config.tick_size
+        else:
+            # For sell orders, place slightly above best bid to ensure execution
+            order_price = best_bid + self.config.tick_size
+        return self.round_to_tick(order_price)
+
     async def place_open_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
         """Place an open order with EdgeX using official SDK with retry logic for POST_ONLY rejections."""
         max_retries = 15

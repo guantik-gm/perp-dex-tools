@@ -253,6 +253,23 @@ class TradingBot:
                 return True
 
         else:
+            new_order_price = await self.exchange_client.get_order_price(self.config.direction)
+
+            def should_wait(direction: str, new_order_price: Decimal, order_result_price: Decimal) -> bool:
+                if direction == "buy":
+                    return new_order_price <= order_result_price
+                elif direction == "sell":
+                    return new_order_price >= order_result_price
+                return False
+
+            while (
+                should_wait(self.config.direction, new_order_price, order_result.price)
+                and self.exchange_client.current_order.status == "OPEN"
+            ):
+                self.logger.log(f"[OPEN] [{order_id}] Waiting for order to be filled", "INFO")
+                await asyncio.sleep(5)
+                new_order_price = await self.exchange_client.get_order_price(self.config.direction)
+
             self.order_canceled_event.clear()
             # Cancel the order if it's still open
             self.logger.log(f"[OPEN] [{order_id}] Cancelling order and placing a new order", "INFO")

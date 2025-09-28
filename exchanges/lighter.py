@@ -302,14 +302,7 @@ class LighterClient(BaseExchangeClient):
 
         self.current_order = None
         self.current_order_client_id = None
-        # Get current market prices
-        best_bid, best_ask = await self.fetch_bbo_prices(contract_id)
-        if best_bid <= 0 or best_ask <= 0 or best_bid >= best_ask:
-            self.logger.log("Invalid bid/ask prices", "ERROR")
-            await asyncio.sleep(5)
-            return OrderResult(success=False, error_message='Invalid bid/ask prices')
-
-        order_price = (best_bid + best_ask) / 2
+        order_price = await self.get_order_price(direction)
 
         order_price = self.round_to_tick(order_price)
         order_result = await self.place_limit_order(contract_id, quantity, order_price, direction)
@@ -349,6 +342,9 @@ class LighterClient(BaseExchangeClient):
         self.current_order = None
         self.current_order_client_id = None
         order_result = await self.place_limit_order(contract_id, quantity, price, side)
+
+        # wait for 5 seconds to ensure order is placed
+        await asyncio.sleep(5)
         if order_result.success:
             return OrderResult(
                 success=True,
@@ -360,6 +356,17 @@ class LighterClient(BaseExchangeClient):
             )
         else:
             raise Exception(f"[CLOSE] Error placing order: {order_result.error_message}")
+    
+    async def get_order_price(self, side: str = '') -> Decimal:
+        """Get the price of an order with Lighter using official SDK."""
+        # Get current market prices
+        best_bid, best_ask = await self.fetch_bbo_prices(self.config.contract_id)
+        if best_bid <= 0 or best_ask <= 0 or best_bid >= best_ask:
+            self.logger.log("Invalid bid/ask prices", "ERROR")
+            raise ValueError("Invalid bid/ask prices")
+
+        order_price = (best_bid + best_ask) / 2
+        return order_price
 
     async def cancel_order(self, order_id: str) -> OrderResult:
         """Cancel an order with Lighter."""

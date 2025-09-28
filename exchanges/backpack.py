@@ -283,6 +283,21 @@ class BackpackClient(BaseExchangeClient):
         except Exception as e:
             self.logger.log(f"Error handling WebSocket order update: {e}", "ERROR")
 
+    async def get_order_price(self, direction: str) -> Decimal:
+        """Get the price of an order with Backpack using official SDK."""
+        best_bid, best_ask = await self.fetch_bbo_prices(self.config.contract_id)
+        if best_bid <= 0 or best_ask <= 0:
+            self.logger.log("Invalid bid/ask prices", "ERROR")
+            raise ValueError("Invalid bid/ask prices")
+
+        if direction == 'buy':
+            # For buy orders, place slightly below best ask to ensure execution
+            order_price = best_ask - self.config.tick_size
+        else:
+            # For sell orders, place slightly above best bid to ensure execution
+            order_price = best_bid + self.config.tick_size
+        return self.round_to_tick(order_price)
+
     @query_retry(default_return=(0, 0))
     async def fetch_bbo_prices(self, contract_id: str) -> Tuple[Decimal, Decimal]:
         # Get order book depth from Backpack
