@@ -256,28 +256,40 @@ class TradingBot:
             self.order_canceled_event.clear()
             # Cancel the order if it's still open
             self.logger.log(f"[OPEN] [{order_id}] Cancelling order and placing a new order", "INFO")
-            try:
+            if self.config.exchange == "lighter":
                 cancel_result = await self.exchange_client.cancel_order(order_id)
-                if not cancel_result.success:
-                    self.order_canceled_event.set()
-                    self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "ERROR")
+                start_time = time.time()
+                while (time.time() - start_time < 10 and self.exchange_client.current_order.status != 'CANCELED' and
+                        self.exchange_client.current_order.status != 'FILLED'):
+                    await asyncio.sleep(0.1)
+
+                if self.exchange_client.current_order.status not in ['CANCELED', 'FILLED']:
+                    raise Exception(f"[OPEN] Error cancelling order: {self.exchange_client.current_order.status}")
                 else:
-                    self.current_order_status = "CANCELED"
-
-            except Exception as e:
-                self.order_canceled_event.set()
-                self.logger.log(f"[CLOSE] Error canceling order {order_id}: {e}", "ERROR")
-
-            if self.config.exchange == "backpack":
-                self.order_filled_amount = cancel_result.filled_size
+                    self.order_filled_amount = self.exchange_client.current_order.filled_size
             else:
-                # Wait for cancel event or timeout
-                if not self.order_canceled_event.is_set():
-                    try:
-                        await asyncio.wait_for(self.order_canceled_event.wait(), timeout=5)
-                    except asyncio.TimeoutError:
-                        order_info = await self.exchange_client.get_order_info(order_id)
-                        self.order_filled_amount = order_info.filled_size
+                try:
+                    cancel_result = await self.exchange_client.cancel_order(order_id)
+                    if not cancel_result.success:
+                        self.order_canceled_event.set()
+                        self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "ERROR")
+                    else:
+                        self.current_order_status = "CANCELED"
+
+                except Exception as e:
+                    self.order_canceled_event.set()
+                    self.logger.log(f"[CLOSE] Error canceling order {order_id}: {e}", "ERROR")
+
+                if self.config.exchange == "backpack":
+                    self.order_filled_amount = cancel_result.filled_size
+                else:
+                    # Wait for cancel event or timeout
+                    if not self.order_canceled_event.is_set():
+                        try:
+                            await asyncio.wait_for(self.order_canceled_event.wait(), timeout=5)
+                        except asyncio.TimeoutError:
+                            order_info = await self.exchange_client.get_order_info(order_id)
+                            self.order_filled_amount = order_info.filled_size
 
             if self.order_filled_amount > 0:
                 close_side = self.config.close_order_side
@@ -299,8 +311,21 @@ class TradingBot:
                         close_price,
                         close_side
                     )
-                self.last_open_order_time = time.time()
+                    if self.config.exchange == "lighter":
+                        start_time = time.time()
+                        while time.time() - start_time < 5:
+                            await asyncio.sleep(1)
+                            if self.exchange_client.current_order is not None:
+                                if self.exchange_client.current_order.status == 'CANCELED-SELF-TRADE':
+                                    close_order_result = await self.exchange_client.place_close_order(
+                                        self.config.contract_id,
+                                        self.order_filled_amount,
+                                        close_price,
+                                        close_side
+                                    )
+                                    start_time = time.time()
 
+                self.last_open_order_time = time.time()
                 if not close_order_result.success:
                     self.logger.log(f"[CLOSE] Failed to place close order: {close_order_result.error_message}", "ERROR")
 

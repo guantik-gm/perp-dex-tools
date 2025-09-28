@@ -228,12 +228,12 @@ class LighterCustomWebSocketManager:
             self.order_book_offset = None
             self.order_book_sequence_gap = False
 
-    def handle_order_update(self, order_data: Dict[str, Any]):
+    def handle_order_update(self, order_data_list: List[Dict[str, Any]]):
         """Handle order update from WebSocket."""
         try:
             # Call the order update callback if it exists
             if self.order_update_callback:
-                self.order_update_callback(order_data)
+                self.order_update_callback(order_data_list)
 
         except Exception as e:
             self._log(f"Error handling order update: {e}", "ERROR")
@@ -369,11 +369,7 @@ class LighterCustomWebSocketManager:
                                 elif data.get("type") == "update/account_orders":
                                     # Handle account orders updates
                                     orders = data.get("orders", {}).get(str(self.market_index), [])
-                                    if len(orders) == 1:
-                                        order_data = orders[0]
-                                        self.handle_order_update(order_data)
-                                    else:
-                                        self._log(f"Unexpected number of orders: {orders}", "WARNING")
+                                    self.handle_order_update(orders)
                                 elif data.get("type") == "update/order_book" and not self.snapshot_loaded:
                                     # Ignore updates until we have the initial snapshot
                                     continue
@@ -398,7 +394,7 @@ class LighterCustomWebSocketManager:
 
                         except asyncio.TimeoutError:
                             timeout_count += 1
-                            if timeout_count % 3 == 0:
+                            if timeout_count % 30 == 0:
                                 self._log(f"No message from Lighter websocket for {timeout_count} seconds "
                                           f"(abnormal behavior)", "WARNING")
                             continue
