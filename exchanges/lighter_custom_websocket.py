@@ -242,8 +242,10 @@ class LighterCustomWebSocketManager:
         """Connect to Lighter WebSocket using custom implementation."""
         cleanup_counter = 0
         timeout_count = 0
+        reconnect_delay = 1  # Start with 1 second delay
+        max_reconnect_delay = 30  # Maximum delay of 30 seconds
 
-        while not self.running:
+        while True:
             try:
                 # Reset order book state before connecting
                 await self.reset_order_book()
@@ -278,6 +280,8 @@ class LighterCustomWebSocketManager:
                         self._log(f"Error creating auth token for account orders subscription: {e}", "WARNING")
 
                     self.running = True
+                    # Reset reconnect delay on successful connection
+                    reconnect_delay = 1
                     self._log("WebSocket connected using custom implementation", "INFO")
 
                     # Main message processing loop
@@ -400,6 +404,7 @@ class LighterCustomWebSocketManager:
                             continue
                         except websockets.exceptions.ConnectionClosed as e:
                             self._log(f"Lighter websocket connection closed: {e}", "WARNING")
+                            self._log("Connection lost, will attempt to reconnect...", "INFO")
                             break  # Break inner loop to reconnect
                         except websockets.exceptions.WebSocketException as e:
                             self._log(f"Lighter websocket error: {e}", "ERROR")
@@ -413,9 +418,12 @@ class LighterCustomWebSocketManager:
             except Exception as e:
                 self._log(f"Failed to connect to Lighter websocket: {e}", "ERROR")
 
-            # Wait a bit before reconnecting
+            # Wait before reconnecting with exponential backoff
             if self.running:
-                await asyncio.sleep(2)
+                self._log(f"Waiting {reconnect_delay} seconds before reconnecting...", "INFO")
+                await asyncio.sleep(reconnect_delay)
+                # Exponential backoff: double the delay, but cap at max_reconnect_delay
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
 
     async def disconnect(self):
         """Disconnect from WebSocket."""

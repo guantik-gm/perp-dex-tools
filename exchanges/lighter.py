@@ -185,8 +185,13 @@ class LighterClient(BaseExchangeClient):
         price = Decimal(order_data['price'])
         remaining_size = Decimal(order_data['remaining_base_amount'])
 
-        self.logger.log(f"[{order_type}] [{order_id}] {status} "
-                        f"{filled_size} @ {price}", "INFO")
+        if status == 'OPEN':
+            self.logger.log(f"[{order_type}] [{order_id}] {status} "
+                            f"{size} @ {price}", "INFO")
+        else:
+            self.logger.log(f"[{order_type}] [{order_id}] {status} "
+                            f"{filled_size} @ {price}", "INFO")
+
         if order_data['client_order_index'] == self.current_order_client_id:
             current_order = OrderInfo(
                 order_id=order_id,
