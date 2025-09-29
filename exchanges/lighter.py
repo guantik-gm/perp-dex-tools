@@ -210,7 +210,7 @@ class LighterClient(BaseExchangeClient):
                 self.logger.log(f"[{order_type}] [{order_id}] {status} "
                                 f"{filled_size} @ {price}", "INFO")
 
-            if order_data['client_order_index'] == self.current_order_client_id:
+            if order_data['client_order_index'] == self.current_order_client_id or order_type == 'OPEN':
                 current_order = OrderInfo(
                     order_id=order_id,
                     side=side,
