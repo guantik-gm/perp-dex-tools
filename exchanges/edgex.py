@@ -101,7 +101,8 @@ class EdgeXClient(BaseExchangeClient):
                 # wait until either disconnect or stop
                 self._ws_disconnected.clear()
                 done, _ = await asyncio.wait(
-                    {self._ws_stop.wait(), self._ws_disconnected.wait()},
+                    {asyncio.create_task(self._ws_stop.wait()),
+                    asyncio.create_task(self._ws_disconnected.wait()),},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if self._ws_stop.is_set():
