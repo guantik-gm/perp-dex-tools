@@ -94,6 +94,9 @@
 4. **设置环境变量**：
    在项目根目录创建`.env`文件，并使用 env_example.txt 作为样本，修改为你的 api 密匙。
 
+5. **Telegram 机器人设置（可选）**：
+   如需接收交易通知，请参考 [Telegram 机器人设置指南](docs/telegram-bot-setup.md) 配置 Telegram 机器人。
+
 ## 策略概述
 
 **重要提醒**：大家一定要先理解了这个脚本的逻辑和风险，这样你就能设置更适合你自己的参数，或者你也可能觉得这不是一个好策略，根本不想用这个策略来刷交易量。我在推特也说过，我不是为了分享而写这些脚本，而是我真的在用这个脚本，所以才写了，然后才顺便分享出来。
@@ -214,6 +217,11 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 #### 通用配置
 
 - `ACCOUNT_NAME`: 环境变量中当前账号的名称，用于多账号日志区分，可自定义，非必须
+
+#### Telegram 配置（可选）
+
+- `TELEGRAM_BOT_TOKEN`: Telegram 机器人令牌
+- `TELEGRAM_CHAT_ID`: Telegram 对话 ID
 
 #### EdgeX 配置
 

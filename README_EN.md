@@ -81,6 +81,9 @@ You will get 30% fee rebates and points boost
 4. **Set up environment variables**:
    Create a `.env` file in the project root directory and use env_example.txt as a template to modify with your API keys.
 
+5. **Telegram Bot Setup (Optional)**:
+   To receive trading notifications, please refer to the [Telegram Bot Setup Guide](docs/telegram-bot-setup-en.md) to configure your Telegram bot.
+
 ## Strategy Overview
 
 **Important Notice**: Everyone must first understand the logic and risks of this script so you can set parameters that are more suitable for yourself, or you might think this is not a good strategy and don't want to use it at all. As I mentioned on Twitter, I didn't write these scripts for sharing purposes, but because I'm actually using this script myself, so I wrote it, and then shared it.
@@ -201,6 +204,11 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 #### General Configuration
 
 - `ACCOUNT_NAME`: The name of the current account in the environment variable, used for distinguishing between multiple account logs, customizable, not mandatory
+
+#### Telegram Configuration (Optional)
+
+- `TELEGRAM_BOT_TOKEN`: Telegram bot token
+- `TELEGRAM_CHAT_ID`: Telegram chat ID
 
 #### EdgeX Configuration
 

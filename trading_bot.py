@@ -13,6 +13,7 @@ from typing import Optional
 from exchanges import ExchangeFactory
 from helpers import TradingLogger
 from helpers.lark_bot import LarkBot
+from helpers.telegram_bot import TelegramBot
 
 
 @dataclass
@@ -295,7 +296,7 @@ class TradingBot:
                     cancel_result = await self.exchange_client.cancel_order(order_id)
                     if not cancel_result.success:
                         self.order_canceled_event.set()
-                        self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "ERROR")
+                        self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "WARNING")
                     else:
                         self.current_order_status = "CANCELED"
 
@@ -399,7 +400,7 @@ class TradingBot:
                     error_message += "###### ERROR ###### ERROR ###### ERROR ###### ERROR #####\n"
                     self.logger.log(error_message, "ERROR")
 
-                    await self._lark_bot_notify(error_message.lstrip())
+                    await self.send_notification(error_message.lstrip())
 
                     if not self.shutdown_requested:
                         self.shutdown_requested = True
@@ -472,11 +473,17 @@ class TradingBot:
 
         return stop_trading, pause_trading
 
-    async def _lark_bot_notify(self, message: str):
+    async def send_notification(self, message: str):
         lark_token = os.getenv("LARK_TOKEN")
         if lark_token:
-            async with LarkBot(lark_token) as bot:
-                await bot.send_text(message)
+            async with LarkBot(lark_token) as lark_bot:
+                await lark_bot.send_text(message)
+
+        telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if telegram_token and telegram_chat_id:
+            with TelegramBot(telegram_token, telegram_chat_id) as tg_bot:
+                tg_bot.send_text(message)
 
     async def run(self):
         """Main trading loop."""
@@ -528,9 +535,10 @@ class TradingBot:
                 stop_trading, pause_trading = await self._check_price_condition()
                 if stop_trading:
                     msg = f"\n\nWARNING: [{self.config.exchange.upper()}_{self.config.ticker.upper()}] \n"
-                    msg += "Stopped trading due to stop price\n"
+                    msg += "Stopped trading due to stop price triggered\n"
+                    msg += "价格已经达到停止交易价格，脚本将停止交易\n"
+                    await self.send_notification(msg.lstrip())
                     await self.graceful_shutdown(msg)
-                    await self._lark_bot_notify(msg.lstrip())
                     continue
 
                 if pause_trading:
