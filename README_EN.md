@@ -2,7 +2,7 @@
 
 ## Multi-Exchange Trading Bot
 
-A modular trading bot that supports multiple exchanges including EdgeX, Backpack, Paradex, and GRVT. The bot implements an automated strategy that places orders and automatically closes them at a profit.
+A modular trading bot that supports multiple exchanges including EdgeX, Backpack, Paradex, Aster, and Lighter. The bot implements an automated strategy that places orders and automatically closes them at a profit.
 
 ## Referral Links (Enjoy fee rebates and benefits)
 
@@ -12,13 +12,15 @@ Instant VIP 1 Trading Fees; 10% Fee Rebate; 10% Bonus Points
 
 #### Backpack Exchange: [https://backpack.exchange/join/quant](https://backpack.exchange/join/quant)
 
-You will get 30% fee rebates on all your trading fees
+You will get 35% fee rebates on all your trading fees
 
 #### Paradex Exchange: [https://app.paradex.trade/r/quant](https://app.paradex.trade/r/quant)
 
 You will get 10% taker fee discount rebates and potential future benefits
 
-#### GRVT Exchange: [https://grvt.io/exchange/sign-up?ref=QUANT](https://grvt.io/exchange/sign-up?ref=QUANT)
+#### Aster Exchange: [https://www.asterdex.com/zh-CN/referral/5191B1](https://www.asterdex.com/zh-CN/referral/5191B1)
+
+You will get 30% fee rebates and points boost
 
 ## Installation
 
@@ -31,18 +33,62 @@ You will get 10% taker fee discount rebates and potential future benefits
 
 2. **Create and activate virtual environment**:
 
+   First, make sure you are not currently in any virtual environment:
+
+   ```bash
+   deactivate
+   ```
+
+   Create virtual environment:
+
    ```bash
    python3 -m venv env
-   source env/bin/activate  # On Windows: env\Scripts\activate
+   ```
+
+   Activate virtual environment (you need to activate the virtual environment every time you use the script):
+
+   ```bash
+   source env/bin/activate  # Windows: env\Scripts\activate
    ```
 
 3. **Install dependencies**:
+   First, make sure you are not currently in any virtual environment:
+
+   ```bash
+   deactivate
+   ```
+
+   Activate virtual environment (you need to activate the virtual environment every time you use the script):
+
+   ```bash
+   source env/bin/activate  # Windows: env\Scripts\activate
+   ```
 
    ```bash
    pip install -r requirements.txt
    ```
 
-   **Paradex Users**: If you want to use Paradex exchange, you need to install additional Paradex-specific dependencies:
+   **Paradex Users**: If you want to use Paradex exchange, you need to create an additional virtual environment and install Paradex-specific dependencies:
+
+   First, make sure you are not currently in any virtual environment:
+
+   ```bash
+   deactivate
+   ```
+
+   Create a dedicated virtual environment for Paradex (named para_env):
+
+   ```bash
+   python3 -m venv para_env
+   ```
+
+   Activate virtual environment (you need to activate the virtual environment every time you use the script):
+
+   ```bash
+   source para_env/bin/activate  # Windows: para_env\Scripts\activate
+   ```
+
+   Install Paradex dependencies
 
    ```bash
    pip install -r para_requirements.txt
@@ -50,6 +96,9 @@ You will get 10% taker fee discount rebates and potential future benefits
 
 4. **Set up environment variables**:
    Create a `.env` file in the project root directory and use env_example.txt as a template to modify with your API keys.
+
+5. **Telegram Bot Setup (Optional)**:
+   To receive trading notifications, please refer to the [Telegram Bot Setup Guide](docs/telegram-bot-setup-en.md) to configure your Telegram bot.
 
 ## Strategy Overview
 
@@ -150,18 +199,18 @@ ETH Perpetual (with grid step control):
 python runbot.py --exchange backpack --ticker ETH --quantity 0.1 --take-profit 0.02 --max-orders 40 --wait-time 450 --grid-step 0.3
 ```
 
-### GRVT Exchange:
+### Aster Exchange:
 
-ETH Perpetual:
+ETH:
 
 ```bash
-python runbot.py --exchange grvt --ticker ETH --quantity 0.1 --take-profit 0.02 --max-orders 40 --wait-time 450
+python runbot.py --exchange aster --ticker ETH --quantity 0.1 --take-profit 0.02 --max-orders 40 --wait-time 450
 ```
 
-ETH Perpetual (with grid step control):
+ETH (with Boost mode enabled):
 
 ```bash
-python runbot.py --exchange grvt --ticker ETH --quantity 0.1 --take-profit 0.02 --max-orders 40 --wait-time 450 --grid-step 0.3
+python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --aster-boost
 ```
 
 ## Configuration
@@ -171,6 +220,11 @@ python runbot.py --exchange grvt --ticker ETH --quantity 0.1 --take-profit 0.02 
 #### General Configuration
 
 - `ACCOUNT_NAME`: The name of the current account in the environment variable, used for distinguishing between multiple account logs, customizable, not mandatory
+
+#### Telegram Configuration (Optional)
+
+- `TELEGRAM_BOT_TOKEN`: Telegram bot token
+- `TELEGRAM_CHAT_ID`: Telegram chat ID
 
 #### EdgeX Configuration
 
@@ -189,16 +243,32 @@ python runbot.py --exchange grvt --ticker ETH --quantity 0.1 --take-profit 0.02 
 - `PARADEX_L1_ADDRESS`: L1 wallet address
 - `PARADEX_L2_PRIVATE_KEY`: L2 wallet private key (click avatar, wallet, "copy paradex private key")
 
-#### GRVT Configuration
+#### Aster Configuration
 
-- `GRVT_TRADING_ACCOUNT_ID`: Your GRVT trading account ID
-- `GRVT_PRIVATE_KEY`: Your GRVT private key
-- `GRVT_API_KEY`: Your GRVT API key
-- `GRVT_ENVIRONMENT`: Environment setting (prod/testnet/staging/dev, default: prod)
+- `ASTER_API_KEY`: Your Aster API Key
+- `ASTER_SECRET_KEY`: Your Aster API Secret
+
+#### Lighter Configuration
+
+- `API_KEY_PRIVATE_KEY`: Your Lighter API private key
+- `LIGHTER_ACCOUNT_INDEX`: Lighter account index
+- `LIGHTER_API_KEY_INDEX`: Lighter API key index
+
+**How to get LIGHTER_ACCOUNT_INDEX**:
+
+1. Add your wallet address to the end of the following URL:
+
+   ```
+   https://mainnet.zklighter.elliot.ai/api/v1/account?by=l1_address&value=
+   ```
+
+2. Open this URL in your browser
+
+3. Search for "account_index" in the results - if you have subaccounts, there will be multiple account_index values. The shorter one is your main account, and the longer ones are your subaccounts.
 
 ### Command Line Arguments
 
-- `--exchange`: Exchange to use: 'edgex', 'backpack', 'paradex', or 'grvt' (default: edgex)
+- `--exchange`: Exchange to use: 'edgex', 'backpack', 'paradex', 'aster', or 'lighter' (default: edgex)
 - `--ticker`: Base asset symbol (e.g., ETH, BTC, SOL). Contract ID is auto-resolved.
 - `--quantity`: Order quantity (default: 0.1)
 - `--take-profit`: Take profit percent (e.g., 0.02 means 0.02%)
@@ -207,8 +277,10 @@ python runbot.py --exchange grvt --ticker ETH --quantity 0.1 --take-profit 0.02 
 - `--max-orders`: Maximum number of active orders (default: 40)
 - `--wait-time`: Wait time between orders in seconds (default: 450)
 - `--grid-step`: Minimum distance in percentage to the next close order price (default: -100, means no restriction)
-- `--stop-price`: For BUY direction: exit when price >= stop-price. For SELL direction: exit when price <= stop-price. (Default: -1, no price-based termination)
-- `--pause-price`: For BUY direction: pause when price >= pause-price. For SELL direction: pause when price <= pause-price. (Default: -1, no price-based pausing)
+- `--stop-price`: When `direction` is 'buy', stop trading and exit the program when price >= stop-price; 'sell' logic is opposite (default: -1, no price-based termination). The purpose of this parameter is to prevent orders from being placed at "high points for long positions or low points for short positions that you consider".
+- `--pause-price`: When `direction` is 'buy', pause trading when price >= pause-price and resume trading when price falls back below pause-price; 'sell' logic is opposite (default: -1, no price-based pausing). The purpose of this parameter is to prevent orders from being placed at "high points for long positions or low points for short positions that you consider".
+- `--aster-boost`: Enable Boost mode for volume boosting on Aster exchange (only available for aster exchange)
+  `--aster-boost` trading logic: Place maker orders to open positions, immediately close with taker orders after fill, repeat this cycle. Wear consists of one maker order, one taker order fees, and slippage.
 
 ## Logging
 
@@ -224,8 +296,9 @@ The bot provides comprehensive logging:
 ### How to configure multiple accounts for the same exchange on the same device?
 
 1. Create a .env file for each account, such as account_1.env, account_2.env
-2. Configure the keys for each account in each file
-3. Use different `--env-file` parameters in the command line to start different accounts, such as `python runbot.py --env-file account_1.env [other parameters...]`
+2. Set `ACCOUNT_NAME=` in each account's .env file, such as `ACCOUNT_NAME=MAIN`.
+3. Configure the API keys or secrets for each account in each file
+4. Use different `--env-file` parameters in the command line to start different accounts, such as `python runbot.py --env-file account_1.env [other parameters...]`
 
 ### How to configure multiple accounts for different exchanges on the same device?
 
@@ -245,7 +318,9 @@ Configure the account in the `.env` file, then use different `--ticker` paramete
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under a Non-Commercial License - see the [LICENSE](LICENSE) file for details.
+
+**Important Notice**: This software is for personal learning and research purposes only. Commercial use is strictly prohibited. For commercial use, please contact the author for a commercial license.
 
 ## Disclaimer
 

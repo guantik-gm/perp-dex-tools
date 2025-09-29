@@ -15,7 +15,7 @@ exchanges/
 ├── edgex.py             # EdgeX exchange implementation
 ├── backpack.py          # Backpack exchange implementation
 ├── paradex.py           # Paradex exchange implementation
-├── grvt.py              # GRVT exchange implementation
+├── aster.py             # Aster exchange implementation
 ├── factory.py           # Exchange factory for dynamic selection
 └── your_exchange.py     # Your new exchange implementation
 ```
@@ -241,7 +241,7 @@ class ExchangeFactory:
         'edgex': EdgeXClient,
         'backpack': BackpackClient,
         'paradex': ParadexClient,
-        'grvt': GrvtClient,
+        'aster': AsterClient,
         'your_exchange': YourExchangeClient,  # Add this line
     }
 ```
@@ -253,7 +253,7 @@ Add your exchange to `exchanges/__init__.py`:
 ```python
 from .your_exchange import YourExchangeClient
 
-__all__ = ['BaseExchangeClient', 'EdgeXClient', 'BackpackClient', 'ParadexClient', 'GrvtClient', 'YourExchangeClient', 'ExchangeFactory']
+__all__ = ['BaseExchangeClient', 'EdgeXClient', 'BackpackClient', 'ParadexClient', 'AsterClient', 'YourExchangeClient', 'ExchangeFactory']
 ```
 
 ### 4. Test Your Implementation
