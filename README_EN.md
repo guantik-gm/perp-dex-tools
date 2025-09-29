@@ -50,6 +50,15 @@ You will get 30% fee rebates and points boost
    ```
 
 3. **Install dependencies**:
+   First, make sure you are not currently in any virtual environment:
+   ```bash
+   deactivate
+   ```
+
+   Activate virtual environment (you need to activate the virtual environment every time you use the script):
+   ```bash
+   source env/bin/activate  # Windows: env\Scripts\activate
+   ```
 
    ```bash
    pip install -r requirements.txt
@@ -194,7 +203,7 @@ python runbot.py --exchange aster --ticker ETH --quantity 0.1 --take-profit 0.02
 ETH (with Boost mode enabled):
 
 ```bash
-python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --wait-time 450 --aster-boost
+python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --aster-boost
 ```
 
 ## Configuration
@@ -260,8 +269,8 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 - `--max-orders`: Maximum number of active orders (default: 40)
 - `--wait-time`: Wait time between orders in seconds (default: 450)
 - `--grid-step`: Minimum distance in percentage to the next close order price (default: -100, means no restriction)
-- `--stop-price`: For BUY direction: exit when price >= stop-price. For SELL direction: exit when price <= stop-price. (Default: -1, no price-based termination)
-- `--pause-price`: For BUY direction: pause when price >= pause-price. For SELL direction: pause when price <= pause-price. (Default: -1, no price-based pausing)
+- `--stop-price`: When `direction` is 'buy', stop trading and exit the program when price >= stop-price; 'sell' logic is opposite (default: -1, no price-based termination). The purpose of this parameter is to prevent orders from being placed at "high points for long positions or low points for short positions that you consider".
+- `--pause-price`: When `direction` is 'buy', pause trading when price >= pause-price and resume trading when price falls back below pause-price; 'sell' logic is opposite (default: -1, no price-based pausing). The purpose of this parameter is to prevent orders from being placed at "high points for long positions or low points for short positions that you consider".
 - `--aster-boost`: Enable Boost mode for volume boosting on Aster exchange (only available for aster exchange)
   `--aster-boost` trading logic: Place maker orders to open positions, immediately close with taker orders after fill, repeat this cycle. Wear consists of one maker order, one taker order fees, and slippage.
 
