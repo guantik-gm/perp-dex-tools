@@ -262,9 +262,15 @@ class TradingBot:
                     return new_order_price >= order_result_price
                 return False
 
+            if self.config.exchange == "lighter":
+                current_order_status = self.exchange_client.current_order.status
+            else:
+                order_info = await self.exchange_client.get_order_info(order_id)
+                current_order_status = order_info.status
+
             while (
                 should_wait(self.config.direction, new_order_price, order_result.price)
-                and self.exchange_client.current_order.status == "OPEN"
+                and current_order_status == "OPEN"
             ):
                 self.logger.log(f"[OPEN] [{order_id}] Waiting for order to be filled", "INFO")
                 await asyncio.sleep(5)
@@ -314,6 +320,7 @@ class TradingBot:
                     close_order_result = await self.exchange_client.place_close_order(
                         self.config.contract_id,
                         self.order_filled_amount,
+                        filled_price,
                         close_side
                     )
                 else:

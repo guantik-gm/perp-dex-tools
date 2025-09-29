@@ -44,10 +44,16 @@ class EdgeXClient(BaseExchangeClient):
             stark_pri_key=self.stark_private_key
         )
 
-        # Initialize logger using the same format as helpers
+        # Initialize logger
         self.logger = TradingLogger(exchange="edgex", ticker=self.config.ticker, log_to_console=False)
 
         self._order_update_handler = None
+
+        # --- reconnection state ---
+        self._ws_task: Optional[asyncio.Task] = None
+        self._ws_stop = asyncio.Event()
+        self._ws_disconnected = asyncio.Event()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def _validate_config(self) -> None:
         """Validate EdgeX configuration."""
@@ -56,25 +62,101 @@ class EdgeXClient(BaseExchangeClient):
         if missing_vars:
             raise ValueError(f"Missing required environment variables: {missing_vars}")
 
+    # ---------------------------
+    # Connection / Reconnect
+    # ---------------------------
+
     async def connect(self) -> None:
-        """Connect to EdgeX WebSocket."""
-        self.ws_manager.connect_private()
-        # Wait a moment for connection to establish
-        await asyncio.sleep(2)
+        """Connect private WS and keep it alive with auto-reconnect."""
+        self._loop = asyncio.get_running_loop()
+
+        # Hook disconnect/connect once (SDK calls these from threads)
+        try:
+            private_client = self.ws_manager.get_private_client()
+            private_client.on_disconnect(
+                lambda exc: self._loop.call_soon_threadsafe(self._ws_disconnected.set)
+            )
+            private_client.on_connect(
+                lambda: self.logger.log("[WS] private connected", "INFO")
+            )
+        except Exception as e:
+            self.logger.log(f"[WS] failed to set hooks: {e}", "ERROR")
+
+        if not self._ws_task or self._ws_task.done():
+            self._ws_task = asyncio.create_task(self._run_private_ws())
+
+        # give first connection a moment (optional)
+        await asyncio.sleep(0.5)
+
+    async def _run_private_ws(self):
+        """Tiny reconnect loop with exponential backoff."""
+        backoff = 1.0
+        while not self._ws_stop.is_set():
+            try:
+                # connect
+                self.ws_manager.connect_private()
+                self.logger.log("[WS] connected", "INFO")
+                backoff = 1.0
+
+                # wait until either disconnect or stop
+                self._ws_disconnected.clear()
+                done, _ = await asyncio.wait(
+                    {self._ws_stop.wait(), self._ws_disconnected.wait()},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if self._ws_stop.is_set():
+                    break
+
+                self.logger.log(
+                    "[WS] disconnected; attempting to reconnect…", "WARNING"
+                )
+            except Exception as e:
+                self.logger.log(f"[WS] connect error: {e}", "ERROR")
+            finally:
+                # ensure socket is closed before retry
+                try:
+                    self.ws_manager.disconnect_private()
+                except Exception:
+                    pass
+
+            # backoff and retry
+            await asyncio.sleep(backoff)
+            backoff = min(60.0, backoff * 2)
+
+        # Final cleanup (on stop)
+        try:
+            self.ws_manager.disconnect_private()
+        except Exception:
+            pass
 
     async def disconnect(self) -> None:
         """Disconnect from EdgeX."""
         try:
-            if hasattr(self, 'client') and self.client:
+            self._ws_stop.set()
+            if self._ws_task:
+                await self._ws_task
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "client") and self.client:
                 await self.client.close()
-            if hasattr(self, 'ws_manager'):
+            if hasattr(self, "ws_manager"):
                 self.ws_manager.disconnect_all()
         except Exception as e:
             self.logger.log(f"Error during EdgeX disconnect: {e}", "ERROR")
 
+    # ---------------------------
+    # Utility / Name
+    # ---------------------------
+
     def get_exchange_name(self) -> str:
         """Get the exchange name."""
         return "edgex"
+
+    # ---------------------------
+    # WS Handlers
+    # ---------------------------
 
     def setup_order_update_handler(self, handler) -> None:
         """Setup order update handler for WebSocket."""
@@ -141,6 +223,10 @@ class EdgeXClient(BaseExchangeClient):
             private_client.on_message("trade-event", order_update_handler)
         except Exception as e:
             self.logger.log(f"Could not add trade-event handler: {e}", "ERROR")
+
+    # ---------------------------
+    # REST-ish helpers
+    # ---------------------------
 
     @query_retry(default_return=(0, 0))
     async def fetch_bbo_prices(self, contract_id: str) -> Tuple[Decimal, Decimal]:

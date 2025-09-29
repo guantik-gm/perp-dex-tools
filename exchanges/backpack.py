@@ -51,36 +51,37 @@ class BackpackWebSocketManager:
 
     async def connect(self):
         """Connect to Backpack WebSocket."""
-        try:
-            self.websocket = await websockets.connect(self.ws_url)
-            self.running = True
+        while True:
+            try:
+                self.logger.log(f"Connecting to Backpack WebSocket", "INFO")
+                self.websocket = await websockets.connect(self.ws_url)
+                self.running = True
 
-            # Subscribe to order updates for the specific symbol
-            timestamp = int(time.time() * 1000)
-            signature = self._generate_signature("subscribe", timestamp)
+                # Subscribe to order updates for the specific symbol
+                timestamp = int(time.time() * 1000)
+                signature = self._generate_signature("subscribe", timestamp)
 
-            subscribe_message = {
-                "method": "SUBSCRIBE",
-                "params": [f"account.orderUpdate.{self.symbol}"],
-                "signature": [
-                    self.public_key,
-                    signature,
-                    str(timestamp),
-                    "5000"
-                ]
-            }
+                subscribe_message = {
+                    "method": "SUBSCRIBE",
+                    "params": [f"account.orderUpdate.{self.symbol}"],
+                    "signature": [
+                        self.public_key,
+                        signature,
+                        str(timestamp),
+                        "5000"
+                    ]
+                }
 
-            await self.websocket.send(json.dumps(subscribe_message))
-            if self.logger:
-                self.logger.log(f"Subscribed to order updates for {self.symbol}", "INFO")
+                await self.websocket.send(json.dumps(subscribe_message))
+                if self.logger:
+                    self.logger.log(f"Subscribed to order updates for {self.symbol}", "INFO")
 
-            # Start listening for messages
-            await self._listen()
+                # Start listening for messages
+                await self._listen()
 
-        except Exception as e:
-            if self.logger:
-                self.logger.log(f"WebSocket connection error: {e}", "ERROR")
-            raise
+            except Exception as e:
+                if self.logger:
+                    self.logger.log(f"WebSocket connection error: {e}", "ERROR")
 
     async def _listen(self):
         """Listen for WebSocket messages."""
@@ -356,7 +357,7 @@ class BackpackClient(BaseExchangeClient):
 
             if 'code' in order_result:
                 message = order_result.get('message', 'Unknown error')
-                self.logger.log(f"[OPEN] Error placing order: {message}", "ERROR")
+                self.logger.log(f"[OPEN] Order rejected: {message}", "WARNING")
                 continue
 
             # Extract order ID from response
