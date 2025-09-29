@@ -414,7 +414,7 @@ class GrvtClient(BaseExchangeClient):
                 active_close_orders += 1
         return active_close_orders
 
-    @query_retry(default_return=[])
+    @query_retry(reraise=True)
     async def get_active_orders(self, contract_id: str) -> List[OrderInfo]:
         """Get active orders for a contract."""
         # Get active orders using GRVT SDK
@@ -446,7 +446,7 @@ class GrvtClient(BaseExchangeClient):
 
         return order_list
 
-    @query_retry(default_return=0)
+    @query_retry(reraise=True)
     async def get_account_positions(self) -> Decimal:
         """Get account positions."""
         # Get positions using GRVT SDK
