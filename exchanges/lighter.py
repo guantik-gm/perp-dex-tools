@@ -57,6 +57,8 @@ class LighterClient(BaseExchangeClient):
         self.base_amount_multiplier = None
         self.price_multiplier = None
         self.orders_cache = {}
+        self.current_order_client_id = None
+        self.current_order = None
 
     def _validate_config(self) -> None:
         """Validate Lighter configuration."""
