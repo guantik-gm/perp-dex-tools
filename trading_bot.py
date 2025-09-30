@@ -570,6 +570,7 @@ class TradingBot:
             await self.graceful_shutdown("User interruption (Ctrl+C)")
         except Exception as e:
             self.logger.log(f"Critical error: {e}", "ERROR")
+            self.logger.log(f"Traceback: {traceback.format_exc()}", "ERROR")
             await self.graceful_shutdown(f"Critical error: {e}")
             raise
         finally:
