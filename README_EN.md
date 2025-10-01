@@ -2,7 +2,7 @@
 
 ## Multi-Exchange Trading Bot
 
-A modular trading bot that supports multiple exchanges including EdgeX, Backpack, Paradex, Aster, and Lighter. The bot implements an automated strategy that places orders and automatically closes them at a profit.
+A modular trading bot that supports multiple exchanges including EdgeX, Backpack, Paradex, Aster, Lighter, and GRVT. The bot implements an automated strategy that places orders and automatically closes them at a profit.
 
 ## Referral Links (Enjoy fee rebates and benefits)
 
@@ -21,6 +21,8 @@ You will get 10% taker fee discount rebates and potential future benefits
 #### Aster Exchange: [https://www.asterdex.com/zh-CN/referral/5191B1](https://www.asterdex.com/zh-CN/referral/5191B1)
 
 You will get 30% fee rebates and points boost
+
+#### GRVT Exchange: [https://grvt.io/exchange/sign-up?ref=QUANT](https://grvt.io/exchange/sign-up?ref=QUANT)
 
 ## Installation
 
@@ -213,6 +215,14 @@ ETH (with Boost mode enabled):
 python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --aster-boost
 ```
 
+### GRVT Exchange:
+
+BTC:
+
+```bash
+python runbot.py --exchange grvt --ticker BTC --quantity 0.05 --take-profit 0.02 --max-orders 40 --wait-time 450
+```
+
 ## Configuration
 
 ### Environment Variables
@@ -254,6 +264,12 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 - `LIGHTER_ACCOUNT_INDEX`: Lighter account index
 - `LIGHTER_API_KEY_INDEX`: Lighter API key index
 
+#### GRVT Configuration
+
+- `GRVT_TRADING_ACCOUNT_ID`: Your GRVT trading account ID
+- `GRVT_PRIVATE_KEY`: Your GRVT private key
+- `GRVT_API_KEY`: Your GRVT API key
+
 **How to get LIGHTER_ACCOUNT_INDEX**:
 
 1. Add your wallet address to the end of the following URL:
@@ -268,7 +284,7 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 
 ### Command Line Arguments
 
-- `--exchange`: Exchange to use: 'edgex', 'backpack', 'paradex', 'aster', or 'lighter' (default: edgex)
+- `--exchange`: Exchange to use: 'edgex', 'backpack', 'paradex', 'aster', 'lighter', or 'grvt' (default: edgex)
 - `--ticker`: Base asset symbol (e.g., ETH, BTC, SOL). Contract ID is auto-resolved.
 - `--quantity`: Order quantity (default: 0.1)
 - `--take-profit`: Take profit percent (e.g., 0.02 means 0.02%)

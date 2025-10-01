@@ -6,7 +6,7 @@
 
 ## 自动交易机器人
 
-一个支持多个交易所（目前包括 EdgeX, Backpack, Paradex, Aster, Lighter）的模块化交易机器人。该机器人实现了自动下单并在盈利时自动平仓的策略，主要目的是取得高交易量。
+一个支持多个交易所（目前包括 EdgeX, Backpack, Paradex, Aster, Lighter, GRVT）的模块化交易机器人。该机器人实现了自动下单并在盈利时自动平仓的策略，主要目的是取得高交易量。
 
 ## 邀请链接 (获得返佣以及福利)
 
@@ -25,6 +25,8 @@
 #### Aster 交易所: [https://www.asterdex.com/zh-CN/referral/5191B1](https://www.asterdex.com/zh-CN/referral/5191B1)
 
 使用我的推荐链接获得 30% 手续费返佣以及积分加成
+
+#### GRVT 交易所: [https://grvt.io/exchange/sign-up?ref=QUANT](https://grvt.io/exchange/sign-up?ref=QUANT)
 
 ## 安装
 
@@ -217,6 +219,14 @@ ETH（启用 Boost 模式）：
 python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --aster-boost
 ```
 
+### GRVT 交易所：
+
+BTC：
+
+```bash
+python runbot.py --exchange grvt --ticker BTC --quantity 0.05 --take-profit 0.02 --max-orders 40 --wait-time 450
+```
+
 ## 配置
 
 ### 环境变量
@@ -258,6 +268,12 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 - `LIGHTER_ACCOUNT_INDEX`: Lighter 账户索引
 - `LIGHTER_API_KEY_INDEX`: Lighter API 密钥索引
 
+#### GRVT 配置
+
+- `GRVT_TRADING_ACCOUNT_ID`: 您的 GRVT 交易账户 ID
+- `GRVT_PRIVATE_KEY`: 您的 GRVT 私钥
+- `GRVT_API_KEY`: 您的 GRVT API 密钥
+
 **获取 LIGHTER_ACCOUNT_INDEX 的方法**：
 
 1. 在下面的网址最后加上你的钱包地址：
@@ -272,7 +288,7 @@ python runbot.py --exchange aster --ticker ETH --direction buy --quantity 0.1 --
 
 ### 命令行参数
 
-- `--exchange`: 使用的交易所：'edgex'、'backpack'、'paradex'、'aster'或'lighter'（默认：edgex）
+- `--exchange`: 使用的交易所：'edgex'、'backpack'、'paradex'、'aster'、'lighter'或'grvt'（默认：edgex）
 - `--ticker`: 标的资产符号（例如：ETH、BTC、SOL）。合约 ID 自动解析。
 - `--quantity`: 订单数量（默认：0.1）
 - `--take-profit`: 止盈百分比（例如 0.02 表示 0.02%）
