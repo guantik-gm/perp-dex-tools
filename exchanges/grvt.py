@@ -50,6 +50,7 @@ class GrvtClient(BaseExchangeClient):
 
         self._order_update_handler = None
         self._ws_client = None
+        self._order_update_callback = None
 
     def _initialize_grvt_clients(self) -> None:
         """Initialize the GRVT REST and WebSocket clients."""
@@ -80,22 +81,35 @@ class GrvtClient(BaseExchangeClient):
     async def connect(self) -> None:
         """Connect to GRVT WebSocket."""
         try:
-            # Initialize WebSocket client
+            # Initialize WebSocket client - match the working test implementation
             loop = asyncio.get_running_loop()
+
+            # Import logger from pysdk like in the test file
+            from pysdk.grvt_ccxt_logging_selector import logger
+
+            # Parameters for GRVT SDK - match test file structure
+            parameters = {
+                'api_key': self.api_key,
+                'trading_account_id': self.trading_account_id,
+                'api_ws_version': 'v1',
+                'private_key': self.private_key
+            }
+
             self._ws_client = GrvtCcxtWS(
                 env=self.env,
                 loop=loop,
-                parameters={
-                    'trading_account_id': self.trading_account_id,
-                    'private_key': self.private_key,
-                    'api_key': self.api_key,
-                    'api_ws_version': 'v1'
-                }
+                logger=logger,  # Add logger parameter like in test file
+                parameters=parameters
             )
 
             # Initialize and connect
             await self._ws_client.initialize()
             await asyncio.sleep(2)  # Wait for connection to establish
+
+            # If an order update callback was set before connect, subscribe now
+            if self._order_update_callback is not None:
+                asyncio.create_task(self._subscribe_to_orders(self._order_update_callback))
+                self.logger.log(f"Deferred subscription started for {self.config.contract_id}", "INFO")
 
         except Exception as e:
             self.logger.log(f"Error connecting to GRVT WebSocket: {e}", "ERROR")
@@ -118,71 +132,65 @@ class GrvtClient(BaseExchangeClient):
         self._order_update_handler = handler
 
         async def order_update_callback(message: Dict[str, Any]):
-            """Handle order updates from WebSocket."""
+            """Handle order updates from WebSocket - match working test implementation."""
             # Log raw message for debugging
-            print(f"Received WebSocket message: {message}", "DEBUG")
-            print("**************************************************")            
+            self.logger.log(f"Received WebSocket message: {message}", "DEBUG")
+            self.logger.log("**************************************************", "DEBUG")
             try:
-                # Parse the message structure - match the working test implementation
+                # Parse the message structure - match the working test implementation exactly
                 if 'feed' in message:
                     data = message.get('feed', {})
-                    if isinstance(data, dict):
-                        # Extract order data using the correct structure from test
+                    leg = data.get('legs', [])[0] if data.get('legs') else None
+
+                    if isinstance(data, dict) and leg:
                         order_state = data.get('state', {})
-                        legs = data.get('legs', [])
+                        # Extract order data using the exact structure from test
+                        order_id = data.get('order_id', '')
+                        status = order_state.get('status', '')
+                        side = 'buy' if leg.get('is_buying_asset') else 'sell'
+                        size = leg.get('size', '0')
+                        price = leg.get('limit_price', '0')
+                        filled_size = order_state.get('traded_size')[0] if order_state.get('traded_size') else '0'
+                        contract_id = leg.get('instrument', '')
 
-                        if legs:
-                            leg = legs[0]  # Get first leg
-                            order_id = data.get('order_id', '')
-                            status = order_state.get('status', '')
-                            side = 'buy' if leg.get('is_buying_asset') else 'sell'
-                            size = leg.get('size', '0')
-                            price = leg.get('limit_price', '0')
-                            filled_size = (order_state.get('traded_size', ['0'])[0]
-                                           if isinstance(order_state.get('traded_size'), list) else '0')
-                            contract_id = leg.get('instrument', '')
-
-                            if order_id and status:
-                                # Determine order type based on side
-                                if side == self.config.close_order_side:
-                                    order_type = "CLOSE"
-                                else:
-                                    order_type = "OPEN"
-
-                                # Map GRVT status to our status
-                                status_map = {
-                                    'OPEN': 'OPEN',
-                                    'FILLED': 'FILLED',
-                                    'CANCELLED': 'CANCELED',
-                                    'REJECTED': 'CANCELED'
-                                }
-                                mapped_status = status_map.get(status, status)
-
-                                # Handle partially filled orders
-                                if status == 'OPEN' and Decimal(filled_size) > 0:
-                                    mapped_status = "PARTIALLY_FILLED"
-
-                                if mapped_status in ['OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED']:
-                                    self.logger.log(f"Processing order update: {order_id} - {mapped_status}", "INFO")
-                                    if self._order_update_handler:
-                                        self._order_update_handler({
-                                            'order_id': order_id,
-                                            'side': side,
-                                            'order_type': order_type,
-                                            'status': mapped_status,
-                                            'size': size,
-                                            'price': price,
-                                            'contract_id': contract_id,
-                                            'filled_size': filled_size
-                                        })
-                                else:
-                                    self.logger.log(f"Ignoring order update with status: {mapped_status}", "DEBUG")
+                        if order_id and status:
+                            # Determine order type based on side
+                            if side == self.config.close_order_side:
+                                order_type = "CLOSE"
                             else:
-                                self.logger.log(f"Order update missing order_id or status: {data}", "DEBUG")
+                                order_type = "OPEN"
+
+                            # Map GRVT status to our status
+                            status_map = {
+                                'OPEN': 'OPEN',
+                                'FILLED': 'FILLED',
+                                'CANCELLED': 'CANCELED',
+                                'REJECTED': 'CANCELED'
+                            }
+                            mapped_status = status_map.get(status, status)
+
+                            # Handle partially filled orders
+                            if status == 'OPEN' and Decimal(filled_size) > 0:
+                                mapped_status = "PARTIALLY_FILLED"
+
+                            if mapped_status in ['OPEN', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED']:
+                                if self._order_update_handler:
+                                    self._order_update_handler({
+                                        'order_id': order_id,
+                                        'side': side,
+                                        'order_type': order_type,
+                                        'status': mapped_status,
+                                        'size': size,
+                                        'price': price,
+                                        'contract_id': contract_id,
+                                        'filled_size': filled_size
+                                    })
+                            else:
+                                self.logger.log(f"Ignoring order update with status: {mapped_status}", "DEBUG")
                         else:
-                            self.logger.log(f"Order update missing legs: {data}", "DEBUG")
+                            self.logger.log(f"Order update missing order_id or status: {data}", "DEBUG")
                     else:
-                        self.logger.log(f"Order update data is not dict: {data}", "DEBUG")
+                        self.logger.log(f"Order update data is not dict or missing legs: {data}", "DEBUG")
                 else:
                     # Handle other message types (position, fill, etc.)
                     method = message.get('method', 'unknown')
@@ -192,21 +200,33 @@ class GrvtClient(BaseExchangeClient):
                 self.logger.log(f"Error handling order update: {e}", "ERROR")
                 self.logger.log(f"Message that caused error: {message}", "ERROR")
 
-        # Subscribe to order updates
+        # Store callback for use after connect
+        self._order_update_callback = order_update_callback
+
+        # Subscribe immediately if WebSocket is already initialized; otherwise defer to connect()
         if self._ws_client:
             try:
-                asyncio.create_task(self._ws_client.subscribe(
-                    stream="order",
-                    callback=order_update_callback,
-                    ws_end_point_type=GrvtWSEndpointType.TRADE_DATA_RPC_FULL,
-                    params={"instrument": self.config.contract_id}
-                ))
-                self.logger.log(f"Successfully subscribed to order updates for {self.config.contract_id}", "INFO")
+                asyncio.create_task(self._subscribe_to_orders(self._order_update_callback))
+                self.logger.log(f"Successfully initiated subscription to order updates for {self.config.contract_id}", "INFO")
             except Exception as e:
                 self.logger.log(f"Error subscribing to order updates: {e}", "ERROR")
                 raise
         else:
-            self.logger.log("WebSocket client not initialized, cannot subscribe to order updates", "ERROR")
+            self.logger.log("WebSocket not ready yet; will subscribe after connect()", "INFO")
+
+    async def _subscribe_to_orders(self, callback):
+        """Subscribe to order updates asynchronously."""
+        try:
+            await self._ws_client.subscribe(
+                stream="order",
+                callback=callback,
+                ws_end_point_type=GrvtWSEndpointType.TRADE_DATA_RPC_FULL,
+                params={"instrument": self.config.contract_id}
+            )
+            await asyncio.sleep(0)  # Small delay like in test file
+            self.logger.log(f"Successfully subscribed to order updates for {self.config.contract_id}", "INFO")
+        except Exception as e:
+            self.logger.log(f"Error in subscription task: {e}", "ERROR")
 
     @query_retry(reraise=True)
     async def fetch_bbo_prices(self, contract_id: str) -> Tuple[Decimal, Decimal]:
@@ -256,6 +276,19 @@ class GrvtClient(BaseExchangeClient):
             raise Exception('Paradex Server Error: Order not processed after 10 seconds')
         else:
             return order_info
+
+    async def get_order_price(self, direction: str) -> Decimal:
+        """Get the price of an order with GRVT using official SDK."""
+        best_bid, best_ask = await self.fetch_bbo_prices(self.config.contract_id)
+        if best_bid <= 0 or best_ask <= 0:
+            raise ValueError("Invalid bid/ask prices")
+
+        if direction == 'buy':
+            return best_ask - self.config.tick_size
+        elif direction == 'sell':
+            return best_bid + self.config.tick_size
+        else:
+            raise ValueError("Invalid direction")
 
     async def place_open_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
         """Place an open order with GRVT."""
