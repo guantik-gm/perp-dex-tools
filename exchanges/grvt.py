@@ -143,6 +143,10 @@ class GrvtClient(BaseExchangeClient):
                     leg = data.get('legs', [])[0] if data.get('legs') else None
 
                     if isinstance(data, dict) and leg:
+                        contract_id = leg.get('instrument', '')
+                        if contract_id != self.config.contract_id:
+                            return
+
                         order_state = data.get('state', {})
                         # Extract order data using the exact structure from test
                         order_id = data.get('order_id', '')
@@ -151,7 +155,6 @@ class GrvtClient(BaseExchangeClient):
                         size = leg.get('size', '0')
                         price = leg.get('limit_price', '0')
                         filled_size = order_state.get('traded_size')[0] if order_state.get('traded_size') else '0'
-                        contract_id = leg.get('instrument', '')
 
                         if order_id and status:
                             # Determine order type based on side
@@ -257,6 +260,8 @@ class GrvtClient(BaseExchangeClient):
             price=price,
             params={'post_only': True}
         )
+        if not order_result:
+            raise Exception(f"[OPEN] Error placing order")
 
         client_order_id = order_result.get('metadata').get('client_order_id')
         order_status = order_result.get('state').get('status')
@@ -321,7 +326,12 @@ class GrvtClient(BaseExchangeClient):
                 raise Exception(f"[OPEN] Invalid direction: {direction}")
 
             # Place the order using GRVT SDK
-            order_info = await self.place_post_only_order(contract_id, quantity, order_price, direction)
+            try:
+                order_info = await self.place_post_only_order(contract_id, quantity, order_price, direction)
+            except Exception as e:
+                self.logger.log(f"[OPEN] Error placing order: {e}", "ERROR")
+                continue
+
             order_status = order_info.status
             order_id = order_info.order_id
 
@@ -370,7 +380,13 @@ class GrvtClient(BaseExchangeClient):
             else:
                 adjusted_price = price
 
-            order_info = await self.place_post_only_order(contract_id, quantity, adjusted_price, side)
+            adjusted_price = self.round_to_tick(adjusted_price)
+            try:
+                order_info = await self.place_post_only_order(contract_id, quantity, adjusted_price, side)
+            except Exception as e:
+                self.logger.log(f"[CLOSE] Error placing order: {e}", "ERROR")
+                continue
+
             order_status = order_info.status
             order_id = order_info.order_id
 
