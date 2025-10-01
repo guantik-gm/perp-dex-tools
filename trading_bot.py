@@ -176,9 +176,9 @@ class TradingBot:
         else:
             cool_down_time = self.config.wait_time / 4
 
-        # if the program detects active_close_orders during startup, it is necessary to consider cooldown_time
-        if self.last_open_order_time == 0 and len(self.active_close_orders) > 0:
-            self.last_open_order_time = time.time()
+        # # if the program detects active_close_orders during startup, it is necessary to consider cooldown_time
+        # if self.last_open_order_time == 0 and len(self.active_close_orders) > 0:
+        #     self.last_open_order_time = time.time()
 
         if time.time() - self.last_open_order_time > cool_down_time:
             return 0
