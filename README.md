@@ -36,6 +36,12 @@
 
 ## 安装
 
+Python 版本要求（最佳选项是 Python 3.10 - 3.12）：
+ - grvt要求python版本在 3.10 及以上
+ - Paradex要求python版本在 3.9 - 3.12
+ - 其他交易所需要python版本在 3.8 及以上
+
+
 1. **克隆仓库**：
 
    ```bash
@@ -78,6 +84,17 @@
 
    ```bash
    pip install -r requirements.txt
+   ```
+
+   **grvt 用户**：如果您想使用 grvt 交易所，需要额外安装grvt专用依赖：
+   激活虚拟环境（每次使用脚本时，都需要激活虚拟环境）：
+
+   ```bash
+   source env/bin/activate  # Windows: env\Scripts\activate
+   ```
+
+   ```bash
+   pip install grvt-pysdk
    ```
 
    **Paradex 用户**：如果您想使用 Paradex 交易所，需要额外创建一个虚拟环境并安装 Paradex 专用依赖：
