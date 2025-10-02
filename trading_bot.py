@@ -246,6 +246,8 @@ class TradingBot:
                     close_price,
                     close_side
                 )
+                if self.config.exchange == "lighter":
+                    await asyncio.sleep(1)
 
                 if not close_order_result.success:
                     self.logger.log(f"[CLOSE] Failed to place close order: {close_order_result.error_message}", "ERROR")
@@ -342,18 +344,7 @@ class TradingBot:
                         close_side
                     )
                     if self.config.exchange == "lighter":
-                        start_time = time.time()
-                        while time.time() - start_time < 5:
-                            await asyncio.sleep(1)
-                            if self.exchange_client.current_order is not None:
-                                if self.exchange_client.current_order.status == 'CANCELED-SELF-TRADE':
-                                    close_order_result = await self.exchange_client.place_close_order(
-                                        self.config.contract_id,
-                                        self.order_filled_amount,
-                                        close_price,
-                                        close_side
-                                    )
-                                    start_time = time.time()
+                        await asyncio.sleep(1)
 
                 self.last_open_order_time = time.time()
                 if not close_order_result.success:
