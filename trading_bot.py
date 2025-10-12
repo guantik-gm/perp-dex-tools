@@ -305,17 +305,66 @@ class TradingBot:
                 else:
                     self.order_filled_amount = self.exchange_client.current_order.filled_size
             else:
+                # 在取消前，先确认订单当前状态
                 try:
-                    cancel_result = await self.exchange_client.cancel_order(order_id)
-                    if not cancel_result.success:
-                        self.order_canceled_event.set()
-                        self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "WARNING")
+                    order_info_before_cancel = await self.exchange_client.get_order_info(order_id)
+                    if order_info_before_cancel is None:
+                        self.logger.log(f"[OPEN] Failed to get order info for {order_id}, will attempt cancel anyway", "WARNING")
+                        pre_cancel_status = "UNKNOWN"
                     else:
-                        self.current_order_status = "CANCELED"
+                        pre_cancel_status = order_info_before_cancel.status
+
+                    # 如果订单已经成交，直接处理成交，跳过取消
+                    if pre_cancel_status == 'FILLED':
+                        self.order_filled_amount = order_info_before_cancel.filled_size
+                        self.order_canceled_event.set()
+                        self.logger.log(f"[OPEN] Order {order_id} already filled: {order_info_before_cancel.filled_size}, skipping cancel", "INFO")
+                    # 如果订单已经取消，记录成交量并继续
+                    elif pre_cancel_status == 'CANCELED':
+                        self.order_filled_amount = order_info_before_cancel.filled_size
+                        self.order_canceled_event.set()
+                        self.logger.log(f"[OPEN] Order {order_id} already canceled, filled: {order_info_before_cancel.filled_size}", "INFO")
+                    # 订单状态为 OPEN 或 UNKNOWN，尝试取消
+                    else:
+                        try:
+                            cancel_result = await self.exchange_client.cancel_order(order_id)
+                            if not cancel_result.success:
+                                # 取消失败时，尝试查询订单状态
+                                self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "WARNING")
+
+                                # 尝试查询订单信息
+                                try:
+                                    order_info = await self.exchange_client.get_order_info(order_id)
+                                    if order_info is not None:
+                                        # 只有查询成功才设置事件和成交量
+                                        self.order_filled_amount = order_info.filled_size
+                                        self.order_canceled_event.set()
+                                        self.logger.log(f"[OPEN] Order {order_id} status: {order_info.status}, filled: {order_info.filled_size}", "INFO")
+                                    else:
+                                        # 查询返回 None，不设置事件，让 timeout 机制处理
+                                        self.logger.log(f"[CLOSE] Query returned None for {order_id}, will use timeout fallback", "WARNING")
+                                except Exception as query_err:
+                                    # 查询失败，不设置事件，让 timeout 机制处理
+                                    self.logger.log(f"[CLOSE] Query failed for {order_id}: {query_err}, will use timeout fallback", "WARNING")
+                            else:
+                                # 取消成功
+                                self.current_order_status = "CANCELED"
+
+                        except Exception as e:
+                            # 取消异常，不设置事件，让 timeout 机制兜底
+                            self.logger.log(f"[CLOSE] Error canceling order {order_id}: {e}", "ERROR")
 
                 except Exception as e:
-                    self.order_canceled_event.set()
-                    self.logger.log(f"[CLOSE] Error canceling order {order_id}: {e}", "ERROR")
+                    # 查询状态失败，记录错误但仍尝试取消
+                    self.logger.log(f"[OPEN] Error checking order status before cancel: {e}, will attempt cancel anyway", "WARNING")
+                    try:
+                        cancel_result = await self.exchange_client.cancel_order(order_id)
+                        if not cancel_result.success:
+                            self.logger.log(f"[CLOSE] Failed to cancel order {order_id}: {cancel_result.error_message}", "WARNING")
+                        else:
+                            self.current_order_status = "CANCELED"
+                    except Exception as cancel_err:
+                        self.logger.log(f"[CLOSE] Error canceling order {order_id}: {cancel_err}", "ERROR")
 
                 if self.config.exchange == "backpack" or self.config.exchange == "extended":
                     self.order_filled_amount = cancel_result.filled_size
