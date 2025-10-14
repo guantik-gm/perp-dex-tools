@@ -82,6 +82,20 @@ class TradingBot:
         self.shutdown_requested = False
         self.loop = None
 
+        self.order_utilization_alerts = {
+            0.5: False,
+            0.8: False,
+            1.0: False,
+        }
+
+        self.open_positions = []
+        self.loss_alert_thresholds = [Decimal('0.5'), Decimal('0.8'), Decimal('1.0')]
+        self.last_loss_check_time = 0
+        self.loss_check_interval = 60
+        self.cumulative_trade_count = 0
+        self.cumulative_base_volume = Decimal('0')
+        self.cumulative_quote_volume = Decimal('0')
+
         # Register order callback
         self._setup_websocket_handlers()
 
@@ -112,10 +126,19 @@ class TradingBot:
                 side = message.get('side', '')
                 order_type = message.get('order_type', '')
                 filled_size = Decimal(message.get('filled_size'))
+                try:
+                    price = Decimal(str(message.get('price', '0')))
+                except Exception:
+                    price = Decimal('0')
                 if order_type == "OPEN":
                     self.current_order_status = status
 
                 if status == 'FILLED':
+                    if order_type == "OPEN":
+                        self._record_open_fill(filled_size, price)
+                    else:
+                        self._record_close_fill(filled_size, price)
+
                     if order_type == "OPEN":
                         self.order_filled_amount = filled_size
                         # Ensure thread-safe interaction with asyncio event loop
@@ -440,6 +463,8 @@ class TradingBot:
                 self.logger.log(f"Current Position: {position_amt} | Active closing amount: {active_close_amount} | "
                                 f"Order quantity: {len(self.active_close_orders)}")
                 self.last_log_time = time.time()
+                await self._maybe_send_order_utilization_alert(len(self.active_close_orders))
+                await self._check_position_loss()
                 # Check for position mismatch
                 if abs(position_amt - active_close_amount) > (2 * self.config.quantity):
                     error_message = f"\n\nERROR: [{self.config.exchange.upper()}_{self.config.ticker.upper()}] "
@@ -467,6 +492,96 @@ class TradingBot:
                 self.logger.log(f"Traceback: {traceback.format_exc()}", "ERROR")
 
             print("--------------------------------")
+
+    async def _maybe_send_order_utilization_alert(self, active_close_count: int):
+        if self.config.max_orders <= 0:
+            return
+
+        utilization = active_close_count / self.config.max_orders
+        for threshold, sent in self.order_utilization_alerts.items():
+            if not sent and utilization >= threshold:
+                current_pct = round(utilization * 100, 1)
+                message = (
+                    f"🚨 风险提醒 | {self.config.exchange.upper()}_{self.config.ticker.upper()} 当前已有 "
+                    f"{active_close_count}/{self.config.max_orders} (≈{current_pct:.1f}%) 平仓单，"
+                    f"达到 {int(threshold * 100)}% 阈值，请注意潜在下跌风险。"
+                )
+                await self.send_notification(message)
+                self.order_utilization_alerts[threshold] = True
+
+    def _record_open_fill(self, size: Decimal, price: Decimal):
+        if size <= 0:
+            return
+
+        self.cumulative_trade_count += 1
+        self.cumulative_base_volume += size
+        self.cumulative_quote_volume += size * price
+        alerts = {threshold: False for threshold in self.loss_alert_thresholds}
+        self.open_positions.append({
+            "size": size,
+            "price": price,
+            "alerts": alerts,
+        })
+
+    def _record_close_fill(self, size: Decimal, price: Decimal):
+        if size <= 0:
+            return
+
+        self.cumulative_trade_count += 1
+        self.cumulative_base_volume += size
+        self.cumulative_quote_volume += size * price
+
+        remaining = size
+        while remaining > 0 and self.open_positions:
+            current = self.open_positions[0]
+            if current["size"] <= remaining:
+                remaining -= current["size"]
+                self.open_positions.pop(0)
+            else:
+                current["size"] -= remaining
+                remaining = Decimal('0')
+
+    async def _check_position_loss(self):
+        if not self.open_positions:
+            return
+
+        now = time.time()
+        if now - self.last_loss_check_time < self.loss_check_interval:
+            return
+
+        try:
+            best_bid, best_ask = await self.exchange_client.fetch_bbo_prices(self.config.contract_id)
+        except Exception as e:
+            self.logger.log(f"Failed to fetch order book for loss check: {e}", "WARNING")
+            return
+
+        current_price = best_bid if self.config.direction == "buy" else best_ask
+        if current_price <= 0:
+            current_price = Decimal('0')
+
+        self.last_loss_check_time = now
+
+        for position in self.open_positions:
+            entry_price = position["price"]
+            if entry_price <= 0:
+                continue
+
+            if self.config.direction == "buy":
+                loss_pct = max(Decimal('0'), (entry_price - current_price) / entry_price)
+            else:
+                loss_pct = max(Decimal('0'), (current_price - entry_price) / entry_price)
+
+            for threshold in self.loss_alert_thresholds:
+                if position["alerts"].get(threshold):
+                    continue
+                if loss_pct >= threshold:
+                    loss_percent = loss_pct * Decimal('100')
+                    message = (
+                        f"🚨 亏损告警 | {self.config.exchange.upper()}_{self.config.ticker.upper()} 仓位亏损约 "
+                        f"{loss_percent:.1f}% (入场价 {entry_price:.4f}, 当前价 {current_price:.4f}, 数量 {position['size']:.4f})。"
+                    )
+                    await self.send_notification(message)
+                    position["alerts"][threshold] = True
 
     async def _meet_grid_step_condition(self) -> bool:
         if self.active_close_orders:
@@ -617,6 +732,14 @@ class TradingBot:
         except Exception as e:
             self.logger.log(f"Critical error: {e}", "ERROR")
             self.logger.log(f"Traceback: {traceback.format_exc()}", "ERROR")
+            error_message = (
+                f"🚨 程序异常 | {self.config.exchange.upper()}_{self.config.ticker.upper()} "
+                f"出现未捕获错误: {e}，程序将退出。"
+            )
+            try:
+                await self.send_notification(error_message)
+            except Exception as notify_err:
+                self.logger.log(f"Failed to send exception notification: {notify_err}", "ERROR")
             await self.graceful_shutdown(f"Critical error: {e}")
             raise
         finally:
