@@ -424,6 +424,41 @@ python hedge_mode.py --exchange grvt --ticker BTC --size 0.05 --iter 20
 - **控制台输出**：实时状态更新
 - **错误处理**：全面的错误日志记录和处理
 
+## 📈 独立统计服务（可选）
+
+交易主程序仅负责下单、风控与即时告警（订单利用率、亏损、异常退出等），不会发送周期性统计播报。要基于历史成交数据生成交易量报告，可使用仓库内置的 `stats_service.py`。
+
+### 1. 快速运行
+
+```bash
+# 激活与主程序一致的虚拟环境
+source env/bin/activate
+
+# 每 30 分钟统计 logs/ 目录并推送 Telegram
+python stats_service.py --logs-dir logs --interval 1800 --env-file .env
+```
+
+常用参数：
+
+- `--logs-dir`：交易 CSV 所在目录（默认 `logs`）
+- `--interval`：推送间隔（秒），配合 `--once` 可只发送一次
+- `--env-file`：包含 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 的文件（默认 `.env`）
+- `--timezone`：时区名称，默认取 `TIMEZONE` 环境变量或 `Asia/Shanghai`
+
+如需长期后台运行，可结合 `tmux` / `screen` / `supervisor` 或系统计划任务（如 `cron`）：
+
+```bash
+*/30 * * * * /path/to/env/bin/python /path/to/stats_service.py --logs-dir /path/to/logs --env-file /path/to/.env >> /path/to/logs/stats.log 2>&1
+```
+
+### 2. 指标说明
+
+- **累计成交量(计价)**：遍历所有 `_orders.csv` 文件中状态为 `FILLED` 或 `PARTIALLY_FILLED` 的记录，按 `Quantity × Price` 求和。
+- **今日成交量**：筛选日期为统计时刻当天的记录，再按 `Quantity × Price` 汇总。
+- **平均每日/每小时成交量**：以首笔成交时间和最新成交时间之间的跨度为基准计算。
+
+> 提示：如需拆分不同交易所或账户，可按文件名约定（如 `exchange_ticker_account_orders.csv`）自行扩展脚本逻辑。
+
 ## Q & A
 
 ### 如何在同一设备配置同一交易所的多个账号？
