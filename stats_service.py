@@ -1,6 +1,5 @@
 import argparse
 import csv
-import glob
 import math
 import os
 import time
@@ -24,9 +23,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def list_order_files(logs_dir: str) -> Iterable[str]:
+    for entry in sorted(os.scandir(logs_dir), key=lambda e: e.name):
+        if entry.is_file() and entry.name.endswith("_orders.csv"):
+            yield entry.path
+
+
 def iter_order_rows(logs_dir: str) -> Iterable[Tuple[str, Dict[str, str]]]:
-    pattern = os.path.join(logs_dir, "*_orders.csv")
-    for path in glob.glob(pattern):
+    for path in list_order_files(logs_dir):
         try:
             with open(path, newline="", encoding="utf-8") as handle:
                 reader = csv.DictReader(handle)
@@ -55,40 +59,53 @@ def parse_timestamp(value: Optional[str], tz: pytz.BaseTzInfo) -> Optional[datet
         return None
 
 
-def aggregate_quote_volume(logs_dir: str, tz: pytz.BaseTzInfo, now: Optional[datetime] = None) -> Dict[str, Decimal]:
+def aggregate_quote_volume(logs_dir: str, tz: pytz.BaseTzInfo, now: Optional[datetime] = None) -> Dict[str, Dict[str, Dict[str, Decimal]]]:
+    now_ts = now or datetime.now(tz)
+    aggregate: Dict[str, Dict[str, Dict[str, Decimal]]] = {}
+
+    for path in list_order_files(logs_dir):
+        stats = _aggregate_single_file(path, tz, now_ts)
+        if stats is None:
+            continue
+        exchange, ticker = _parse_filename(os.path.basename(path))
+        exchange_map = aggregate.setdefault(exchange, {})
+        exchange_map[ticker] = stats
+
+    return aggregate
+
+
+def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> Optional[Dict[str, Decimal]]:
     total = Decimal("0")
     today_total = Decimal("0")
     first_ts: Optional[datetime] = None
     last_ts: Optional[datetime] = None
-    now_ts = now or datetime.now(tz)
 
-    for _, row in iter_order_rows(logs_dir):
-        status = (row.get("Status") or row.get("status") or "").upper()
-        if status not in {"FILLED", "PARTIALLY_FILLED"}:
-            continue
+    try:
+        with open(path, newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                status = (row.get("Status") or row.get("status") or "").upper()
+                if status not in {"FILLED", "PARTIALLY_FILLED"}:
+                    continue
 
-        quantity = parse_decimal(row.get("Quantity") or row.get("quantity"))
-        price = parse_decimal(row.get("Price") or row.get("price"))
-        timestamp = parse_timestamp(row.get("Timestamp"), tz)
-        if quantity is None or price is None or timestamp is None:
-            continue
+                quantity = parse_decimal(row.get("Quantity") or row.get("quantity"))
+                price = parse_decimal(row.get("Price") or row.get("price"))
+                timestamp = parse_timestamp(row.get("Timestamp"), tz)
+                if quantity is None or price is None or timestamp is None:
+                    continue
 
-        quote_amount = quantity * price
-        total += quote_amount
-        if timestamp.date() == now_ts.date():
-            today_total += quote_amount
+                quote_amount = quantity * price
+                total += quote_amount
+                if timestamp.date() == now_ts.date():
+                    today_total += quote_amount
 
-        first_ts = timestamp if first_ts is None else min(first_ts, timestamp)
-        last_ts = timestamp if last_ts is None else max(last_ts, timestamp)
+                first_ts = timestamp if first_ts is None else min(first_ts, timestamp)
+                last_ts = timestamp if last_ts is None else max(last_ts, timestamp)
+    except FileNotFoundError:
+        return None
 
     if first_ts is None or last_ts is None:
-        zero = Decimal("0")
-        return {
-            "total": zero,
-            "today": zero,
-            "avg_daily": zero,
-            "avg_hourly": zero,
-        }
+        return None
 
     elapsed_days = max(1, (last_ts.date() - first_ts.date()).days + 1)
     duration_hours = max(1, math.ceil((last_ts - first_ts).total_seconds() / 3600))
@@ -101,14 +118,40 @@ def aggregate_quote_volume(logs_dir: str, tz: pytz.BaseTzInfo, now: Optional[dat
     }
 
 
-def format_stats_message(stats: Dict[str, Decimal]) -> str:
-    return "\n".join([
-        "[统计服务] 交易量播报",
-        f"- 累计成交量(计价): {stats['total']:.2f}",
-        f"- 今日成交量: {stats['today']:.2f}",
-        f"- 平均每日成交量: {stats['avg_daily']:.2f}",
-        f"- 平均每小时成交量: {stats['avg_hourly']:.2f}",
-    ])
+def format_stats_message(per_exchange: Dict[str, Dict[str, Dict[str, Decimal]]]) -> str:
+    if not per_exchange:
+        return "[统计服务] 交易量播报\n- 暂无成交记录"
+
+    lines = ["[统计服务] 交易量播报"]
+    for exchange in sorted(per_exchange.keys()):
+        tickers = per_exchange[exchange]
+        if not tickers:
+            continue
+        lines.append(f"==={exchange}===")
+        for ticker in sorted(tickers.keys()):
+            stats = tickers[ticker]
+            lines.append(f"【{ticker}】")
+            lines.append(f"- 总交易量: {format_decimal(stats['total'])}")
+            lines.append(f"- 今日交易量: {format_decimal(stats['today'])}")
+            lines.append(f"- 日均交易量: {format_decimal(stats['avg_daily'])}")
+            lines.append(f"- 小时交易量: {format_decimal(stats['avg_hourly'])}")
+    return "\n".join(lines)
+
+
+def _parse_filename(filename: str) -> Tuple[str, str]:
+    base = filename[:-len("_orders.csv")] if filename.endswith("_orders.csv") else filename
+    parts = base.split("_")
+    if len(parts) >= 2:
+        exchange = parts[0].upper()
+        ticker = parts[1].upper()
+    else:
+        exchange = base.upper()
+        ticker = "-"
+    return exchange, ticker
+
+
+def format_decimal(value: Decimal) -> str:
+    return f"{value:,.2f}"
 
 
 def resolve_timezone(name: Optional[str]) -> pytz.BaseTzInfo:
