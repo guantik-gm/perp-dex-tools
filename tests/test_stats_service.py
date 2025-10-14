@@ -61,6 +61,8 @@ def test_aggregate_quote_volume_with_data(tmp_path):
     assert entry["today"] == Decimal("50")
     assert entry["avg_daily"].quantize(Decimal("0.01")) == Decimal("125.00")
     assert entry["avg_hourly"].quantize(Decimal("0.01")) == Decimal("9.62")
+    assert entry["last_hour"] == Decimal("0")
+    assert entry["current_hour"] == Decimal("0")
 
 
 def test_format_stats_message_layout():
@@ -71,6 +73,8 @@ def test_format_stats_message_layout():
                 "today": Decimal("5478.51"),
                 "avg_daily": Decimal("51031.37"),
                 "avg_hourly": Decimal("4137.68"),
+                "last_hour": Decimal("200"),
+                "current_hour": Decimal("100"),
             }
         },
         "BACKPACK": {
@@ -79,11 +83,13 @@ def test_format_stats_message_layout():
                 "today": Decimal("100"),
                 "avg_daily": Decimal("1000"),
                 "avg_hourly": Decimal("500"),
+                "last_hour": Decimal("50"),
+                "current_hour": Decimal("20"),
             }
         }
     }
 
-    message = format_stats_message(data)
+    message = format_stats_message(data, include_zero_today=True)
     expected = (
         "[统计服务] 交易量播报\n"
         "===ASTER===\n"
@@ -92,11 +98,15 @@ def test_format_stats_message_layout():
         "- 今日交易量: 5,478.51\n"
         "- 日均交易量: 51,031.37\n"
         "- 小时交易量: 4,137.68\n"
+        "- 上1小时交易量: 200.00\n"
+        "- 本小时交易量: 100.00\n"
         "===BACKPACK===\n"
         "【BTC】\n"
         "- 总交易量: 2,000.00\n"
         "- 今日交易量: 100.00\n"
         "- 日均交易量: 1,000.00\n"
-        "- 小时交易量: 500.00"
+        "- 小时交易量: 500.00\n"
+        "- 上1小时交易量: 50.00\n"
+        "- 本小时交易量: 20.00"
     )
     assert message == expected

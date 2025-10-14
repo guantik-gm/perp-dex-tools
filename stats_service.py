@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--env-file", default=".env", help="Environment file providing TELEGRAM credentials")
     parser.add_argument("--timezone", default=None, help="Timezone name, defaults to TIMEZONE env or Asia/Shanghai")
     parser.add_argument("--once", action="store_true", help="Send a single report and exit")
+    parser.add_argument("--include-zero-today", action="store_true", help="Include tokens whose today volume is zero")
     return parser.parse_args()
 
 
@@ -77,6 +78,8 @@ def aggregate_quote_volume(logs_dir: str, tz: pytz.BaseTzInfo, now: Optional[dat
 def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> Optional[Dict[str, Decimal]]:
     total = Decimal("0")
     today_total = Decimal("0")
+    last_hour_total = Decimal("0")
+    current_hour_total = Decimal("0")
     first_ts: Optional[datetime] = None
     last_ts: Optional[datetime] = None
 
@@ -95,9 +98,15 @@ def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> 
                     continue
 
                 quote_amount = quantity * price
+                elapsed = now_ts - timestamp
                 total += quote_amount
                 if timestamp.date() == now_ts.date():
                     today_total += quote_amount
+
+                if 0 <= elapsed.total_seconds() <= 3600:
+                    current_hour_total += quote_amount
+                if 3600 < elapsed.total_seconds() <= 7200:
+                    last_hour_total += quote_amount
 
                 first_ts = timestamp if first_ts is None else min(first_ts, timestamp)
                 last_ts = timestamp if last_ts is None else max(last_ts, timestamp)
@@ -115,10 +124,12 @@ def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> 
         "today": today_total,
         "avg_daily": total / Decimal(elapsed_days),
         "avg_hourly": total / Decimal(duration_hours),
+        "last_hour": last_hour_total,
+        "current_hour": current_hour_total,
     }
 
 
-def format_stats_message(per_exchange: Dict[str, Dict[str, Dict[str, Decimal]]]) -> str:
+def format_stats_message(per_exchange: Dict[str, Dict[str, Dict[str, Decimal]]], include_zero_today: bool = False) -> str:
     if not per_exchange:
         return "[统计服务] 交易量播报\n- 暂无成交记录"
 
@@ -127,14 +138,23 @@ def format_stats_message(per_exchange: Dict[str, Dict[str, Dict[str, Decimal]]])
         tickers = per_exchange[exchange]
         if not tickers:
             continue
-        lines.append(f"==={exchange}===")
+
+        section_lines = [f"==={exchange}==="]
         for ticker in sorted(tickers.keys()):
             stats = tickers[ticker]
-            lines.append(f"【{ticker}】")
-            lines.append(f"- 总交易量: {format_decimal(stats['total'])}")
-            lines.append(f"- 今日交易量: {format_decimal(stats['today'])}")
-            lines.append(f"- 日均交易量: {format_decimal(stats['avg_daily'])}")
-            lines.append(f"- 小时交易量: {format_decimal(stats['avg_hourly'])}")
+            if not include_zero_today and stats["today"] == 0:
+                continue
+
+            section_lines.append(f"【{ticker}】")
+            section_lines.append(f"- 总交易量: {format_decimal(stats['total'])}")
+            section_lines.append(f"- 今日交易量: {format_decimal(stats['today'])}")
+            section_lines.append(f"- 日均交易量: {format_decimal(stats['avg_daily'])}")
+            section_lines.append(f"- 小时交易量: {format_decimal(stats['avg_hourly'])}")
+            section_lines.append(f"- 上1小时交易量: {format_decimal(stats['last_hour'])}")
+            section_lines.append(f"- 本小时交易量: {format_decimal(stats['current_hour'])}")
+
+        if len(section_lines) > 1:
+            lines.extend(section_lines)
     return "\n".join(lines)
 
 
@@ -175,7 +195,7 @@ def main() -> None:
     with TelegramBot(token, chat_id) as bot:
         while True:
             stats = aggregate_quote_volume(args.logs_dir, tz)
-            bot.send_text(format_stats_message(stats))
+            bot.send_text(format_stats_message(stats, include_zero_today=args.include_zero_today))
             if args.once:
                 break
             time.sleep(interval)
