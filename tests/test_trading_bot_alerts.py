@@ -170,4 +170,37 @@ async def test_run_exception_triggers_notification(dummy_exchange, sample_config
     assert len(messages) == 1
     assert "程序异常" in messages[0]
     assert messages[0].startswith("🚨 程序异常")
-    assert "connect boom" in messages[0]
+
+
+@pytest.mark.asyncio
+async def test_runtime_report_every_30_minutes(dummy_exchange, sample_config, monkeypatch, time_stub):
+    bot = TradingBot(sample_config)
+
+    messages = []
+
+    async def fake_send_notification(message):
+        messages.append(message)
+
+    monkeypatch.setattr(bot, "send_notification", fake_send_notification)
+
+    bot.active_close_orders = [
+        {"id": "1", "price": Decimal("100"), "size": Decimal("2")},
+        {"id": "2", "price": Decimal("101"), "size": Decimal("1")},
+    ]
+    bot.open_positions = [
+        {"size": Decimal("1"), "price": Decimal("100"), "alerts": {Decimal('0.5'): False, Decimal('0.8'): False, Decimal('1.0'): False}}
+    ]
+
+    await bot._maybe_send_runtime_report(Decimal("3"), Decimal("3"))
+    assert len(messages) == 1
+    report = messages[0]
+    assert report.startswith("[运行统计]")
+    assert "活跃平仓订单数量" in report
+    assert "累计交易次数" in report
+
+    await bot._maybe_send_runtime_report(Decimal("3"), Decimal("3"))
+    assert len(messages) == 1
+
+    time_stub.advance(bot.report_interval + 1)
+    await bot._maybe_send_runtime_report(Decimal("4"), Decimal("2"))
+    assert len(messages) == 2

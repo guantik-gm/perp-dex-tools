@@ -95,6 +95,8 @@ class TradingBot:
         self.cumulative_trade_count = 0
         self.cumulative_base_volume = Decimal('0')
         self.cumulative_quote_volume = Decimal('0')
+        self.last_report_time = 0
+        self.report_interval = 1800
 
         # Register order callback
         self._setup_websocket_handlers()
@@ -465,6 +467,7 @@ class TradingBot:
                 self.last_log_time = time.time()
                 await self._maybe_send_order_utilization_alert(len(self.active_close_orders))
                 await self._check_position_loss()
+                await self._maybe_send_runtime_report(position_amt, active_close_amount)
                 # Check for position mismatch
                 if abs(position_amt - active_close_amount) > (2 * self.config.quantity):
                     error_message = f"\n\nERROR: [{self.config.exchange.upper()}_{self.config.ticker.upper()}] "
@@ -583,6 +586,26 @@ class TradingBot:
                     await self.send_notification(message)
                     position["alerts"][threshold] = True
 
+    async def _maybe_send_runtime_report(self, position_amt: Decimal, active_close_amount: Decimal):
+        now_ts = time.time()
+        if self.last_report_time != 0 and now_ts - self.last_report_time < self.report_interval:
+            return
+
+        active_close_count = len(self.active_close_orders)
+        remaining_capacity = max(self.config.max_orders - active_close_count, 0)
+        lines = [
+            f"[运行统计] {self.config.exchange.upper()}_{self.config.ticker.upper()}",
+            f"- 当前持仓: {self._fmt_decimal(position_amt)}",
+            f"- 活跃平仓订单数量: {active_close_count}",
+            f"- 活跃平仓订单总量: {self._fmt_decimal(active_close_amount)}",
+            f"- 剩余下单额度: {remaining_capacity}",
+            f"- 当前持仓笔数: {len(self.open_positions)}",
+            f"- 累计交易次数: {self.cumulative_trade_count}",
+        ]
+
+        await self.send_notification("\n".join(lines))
+        self.last_report_time = now_ts
+
     async def _meet_grid_step_condition(self) -> bool:
         if self.active_close_orders:
             picker = min if self.config.direction == "buy" else max
@@ -638,6 +661,13 @@ class TradingBot:
                     pause_trading = True
 
         return stop_trading, pause_trading
+
+    @staticmethod
+    def _fmt_decimal(value: Decimal, digits: int = 4) -> str:
+        try:
+            return f"{value:,.{digits}f}"
+        except Exception:
+            return str(value)
 
     async def send_notification(self, message: str):
         lark_token = os.getenv("LARK_TOKEN")
