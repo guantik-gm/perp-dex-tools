@@ -139,13 +139,13 @@ def format_stats_message(per_exchange: Dict[str, Dict[str, Dict[str, Decimal]]],
         if not tickers:
             continue
 
-        section_lines = [f"==={exchange}==="]
+        section_lines = []
         for ticker in sorted(tickers.keys()):
             stats = tickers[ticker]
             if not include_zero_today and stats["today"] == 0:
                 continue
 
-            section_lines.append(f"【{ticker}】")
+            section_lines.append(f"【{exchange}-{ticker}】")
             section_lines.append(f"- 总交易量: {format_decimal(stats['total'])}")
             section_lines.append(f"- 今日交易量: {format_decimal(stats['today'])}")
             section_lines.append(f"- 日均交易量: {format_decimal(stats['avg_daily'])}")
