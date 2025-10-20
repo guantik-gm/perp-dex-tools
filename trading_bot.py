@@ -32,6 +32,7 @@ class TradingConfig:
     stop_price: Decimal
     pause_price: Decimal
     boost_mode: bool
+    use_ioc_optimization: bool = False  # Enable IOC+market fallback optimization
 
     @property
     def close_order_side(self) -> str:
@@ -249,6 +250,130 @@ class TradingBot:
             self.logger.log(f"Traceback: {traceback.format_exc()}", "ERROR")
             return False
 
+    async def _get_mid_price(self) -> Decimal:
+        """Get the current mid price from the order book."""
+        try:
+            best_bid, best_ask = await self.exchange_client.fetch_bbo_prices(self.config.contract_id)
+            return (best_bid + best_ask) / Decimal('2')
+        except Exception as e:
+            self.logger.log(f"Error getting mid price: {e}", "ERROR")
+            # Fallback to using get_order_price
+            return await self.exchange_client.get_order_price(self.config.close_order_side)
+
+    async def _smart_close_with_ioc(self, quantity: Decimal, side: str) -> OrderResult:
+        """
+        Smart close: Try IOC limit order first, fall back to market order if needed.
+        
+        Args:
+            quantity: The quantity to close
+            side: The side of the close order ('buy' or 'sell')
+            
+        Returns:
+            OrderResult with filled information
+        """
+        # Get current market price
+        mid_price = await self._get_mid_price()
+        
+        # Calculate IOC price (allow small slippage tolerance)
+        ioc_tolerance = Decimal('0.0001')  # 0.01% tolerance
+        if side == 'sell':
+            ioc_price = mid_price * (Decimal('1') - ioc_tolerance)
+        else:  # buy
+            ioc_price = mid_price * (Decimal('1') + ioc_tolerance)
+        
+        ioc_result = None
+        remaining_quantity = quantity
+        
+        # Try IOC limit order first
+        try:
+            self.logger.log(f"[CLOSE_IOC] Attempting IOC order: {quantity} @ {ioc_price}", "INFO")
+            ioc_result = await self.exchange_client.place_ioc_order(
+                self.config.contract_id,
+                quantity,
+                ioc_price,
+                side
+            )
+            
+            if ioc_result.success and ioc_result.filled_size:
+                filled_size = ioc_result.filled_size
+                remaining_quantity = quantity - filled_size
+                
+                if filled_size >= quantity:
+                    # Fully filled via IOC!
+                    self.logger.log(
+                        f"[CLOSE_IOC] ✅ IOC fully filled: {filled_size} @ {ioc_result.price}", 
+                        "INFO"
+                    )
+                    return ioc_result
+                elif filled_size > 0:
+                    # Partially filled
+                    self.logger.log(
+                        f"[CLOSE_IOC] ⚠️ IOC partially filled: {filled_size}/{quantity}, "
+                        f"remaining: {remaining_quantity}",
+                        "INFO"
+                    )
+            else:
+                # IOC didn't fill at all
+                self.logger.log(f"[CLOSE_IOC] IOC not filled, will use market order", "INFO")
+                
+        except Exception as e:
+            self.logger.log(f"[CLOSE_IOC] IOC order error: {e}, falling back to market order", "WARN")
+        
+        # Fall back to market order for remaining quantity
+        if remaining_quantity > 0:
+            self.logger.log(
+                f"[CLOSE_MARKET] Placing market order for remaining: {remaining_quantity}",
+                "INFO"
+            )
+            
+            try:
+                market_result = await self.exchange_client.place_market_order(
+                    self.config.contract_id,
+                    remaining_quantity,
+                    side
+                )
+                
+                if market_result.success:
+                    self.logger.log(
+                        f"[CLOSE_MARKET] ✅ Market order filled: {market_result.filled_size} @ {market_result.price}",
+                        "INFO"
+                    )
+                    
+                    # Combine IOC and market results
+                    if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
+                        # Both IOC and market filled
+                        total_filled = ioc_result.filled_size + market_result.filled_size
+                        # Weighted average price
+                        avg_price = (
+                            (ioc_result.price * ioc_result.filled_size + 
+                             market_result.price * market_result.filled_size) / total_filled
+                        )
+                        
+                        return OrderResult(
+                            success=True,
+                            order_id=market_result.order_id,
+                            side=side,
+                            size=total_filled,
+                            price=avg_price,
+                            status='FILLED',
+                            filled_size=total_filled
+                        )
+                    else:
+                        return market_result
+                else:
+                    self.logger.log(
+                        f"[CLOSE_MARKET] ❌ Market order failed: {market_result.error_message}",
+                        "ERROR"
+                    )
+                    return market_result
+                    
+            except Exception as e:
+                self.logger.log(f"[CLOSE_MARKET] Market order error: {e}", "ERROR")
+                return OrderResult(success=False, error_message=str(e))
+        
+        # Should not reach here, but return ioc_result as fallback
+        return ioc_result if ioc_result else OrderResult(success=False, error_message="No orders placed")
+
     async def _handle_order_result(self, order_result) -> bool:
         """Handle the result of an order placement."""
         order_id = order_result.order_id
@@ -256,11 +381,19 @@ class TradingBot:
 
         if self.order_filled_event.is_set() or order_result.status == 'FILLED':
             if self.config.boost_mode:
-                close_order_result = await self.exchange_client.place_market_order(
-                    self.config.contract_id,
-                    self.config.quantity,
-                    self.config.close_order_side
-                )
+                # Use IOC optimization if enabled
+                if self.config.use_ioc_optimization:
+                    close_order_result = await self._smart_close_with_ioc(
+                        self.config.quantity,
+                        self.config.close_order_side
+                    )
+                else:
+                    # Traditional market order
+                    close_order_result = await self.exchange_client.place_market_order(
+                        self.config.contract_id,
+                        self.config.quantity,
+                        self.config.close_order_side
+                    )
             else:
                 self.last_open_order_time = time.time()
                 # Place close order

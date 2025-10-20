@@ -537,3 +537,142 @@ class GrvtClient(BaseExchangeClient):
                 return self.config.contract_id, self.config.tick_size
 
         raise ValueError(f"Contract not found for ticker: {ticker}")
+
+    async def place_market_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
+        """Place a market order with GRVT."""
+        try:
+            # Place the market order using GRVT SDK
+            order_result = self.rest_client.create_market_order(
+                symbol=contract_id,
+                side=direction,
+                amount=quantity
+            )
+            
+            if not order_result:
+                return OrderResult(success=False, error_message='Failed to place market order')
+
+            client_order_id = order_result.get('metadata', {}).get('client_order_id')
+            order_status = order_result.get('state', {}).get('status')
+            
+            # Wait for order to fill
+            max_wait = 10  # seconds
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait:
+                order_info = await self.get_order_info(client_order_id=client_order_id)
+                if order_info:
+                    if order_info.status == 'FILLED':
+                        return OrderResult(
+                            success=True,
+                            order_id=order_info.order_id,
+                            side=direction,
+                            size=order_info.filled_size,
+                            price=order_info.price,
+                            status='FILLED',
+                            filled_size=order_info.filled_size
+                        )
+                    elif order_info.status in ['REJECTED', 'CANCELED']:
+                        return OrderResult(
+                            success=False,
+                            order_id=order_info.order_id,
+                            error_message=f'Market order {order_info.status}: {order_info.cancel_reason}'
+                        )
+                await asyncio.sleep(0.2)
+            
+            # Timeout
+            return OrderResult(
+                success=False,
+                order_id=client_order_id,
+                error_message='Market order timeout'
+            )
+                
+        except Exception as e:
+            self.logger.log(f"Error placing market order: {e}", "ERROR")
+            return OrderResult(success=False, error_message=str(e))
+
+    async def place_ioc_order(self, contract_id: str, quantity: Decimal, price: Decimal,
+                             direction: str) -> OrderResult:
+        """Place an IOC (Immediate-Or-Cancel) limit order with GRVT."""
+        try:
+            # Round price to tick size
+            price = self.round_to_tick(price)
+            
+            # Place the IOC order using GRVT SDK
+            # GRVT uses time_in_force parameter with value "IMMEDIATE_OR_CANCEL"
+            order_result = self.rest_client.create_limit_order(
+                symbol=contract_id,
+                side=direction,
+                amount=quantity,
+                price=price,
+                params={
+                    'time_in_force': 'IMMEDIATE_OR_CANCEL',  # IOC
+                    # Note: IOC orders don't need order_duration_secs as they cancel immediately
+                }
+            )
+            
+            if not order_result:
+                return OrderResult(success=False, error_message='Failed to place IOC order')
+
+            client_order_id = order_result.get('metadata', {}).get('client_order_id')
+            
+            # Wait for IOC order to complete
+            max_wait = 5  # seconds
+            start_time = time.time()
+            
+            while time.time() - start_time < max_wait:
+                order_info = await self.get_order_info(client_order_id=client_order_id)
+                if order_info:
+                    if order_info.status in ['FILLED', 'CANCELED']:
+                        if order_info.filled_size > 0:
+                            # Partially or fully filled
+                            return OrderResult(
+                                success=True,
+                                order_id=order_info.order_id,
+                                side=direction,
+                                size=quantity,
+                                price=price,
+                                status='FILLED' if order_info.filled_size == quantity else 'PARTIALLY_FILLED',
+                                filled_size=order_info.filled_size
+                            )
+                        else:
+                            # Not filled at all
+                            return OrderResult(
+                                success=False,
+                                order_id=order_info.order_id,
+                                side=direction,
+                                size=quantity,
+                                price=price,
+                                status='CANCELED',
+                                filled_size=Decimal('0'),
+                                error_message='IOC order not filled'
+                            )
+                    elif order_info.status == 'REJECTED':
+                        return OrderResult(
+                            success=False,
+                            order_id=order_info.order_id,
+                            error_message=f'IOC order rejected: {order_info.cancel_reason}'
+                        )
+                await asyncio.sleep(0.1)
+            
+            # Timeout - check if partially filled
+            order_info = await self.get_order_info(client_order_id=client_order_id)
+            if order_info and order_info.filled_size > 0:
+                return OrderResult(
+                    success=True,
+                    order_id=order_info.order_id,
+                    side=direction,
+                    size=quantity,
+                    price=price,
+                    status='PARTIALLY_FILLED',
+                    filled_size=order_info.filled_size
+                )
+            
+            return OrderResult(
+                success=False,
+                order_id=client_order_id,
+                error_message='IOC order timeout'
+            )
+                
+        except Exception as e:
+            self.logger.log(f"Error placing IOC order: {e}", "ERROR")
+            return OrderResult(success=False, error_message=str(e))

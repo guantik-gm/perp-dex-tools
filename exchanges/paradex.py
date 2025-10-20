@@ -667,3 +667,177 @@ class ParadexClient(BaseExchangeClient):
             raise ValueError("Failed to get tick size")
 
         return self.config.contract_id, self.config.tick_size
+
+    async def place_market_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
+        """Place a market order with Paradex."""
+        from paradex_py.common.order import Order, OrderType, OrderSide
+
+        # Convert direction to OrderSide
+        if direction == 'buy':
+            order_side = OrderSide.Buy
+        elif direction == 'sell':
+            order_side = OrderSide.Sell
+        else:
+            return OrderResult(success=False, error_message=f'Invalid direction: {direction}')
+
+        # Create market order
+        order = Order(
+            market=contract_id,
+            order_type=OrderType.Market,
+            order_side=order_side,
+            size=quantity.quantize(self.order_size_increment, rounding=ROUND_HALF_UP)
+        )
+
+        try:
+            # Submit order
+            order_result = self._submit_order_with_retry(order)
+            order_id = order_result.get('id')
+            
+            # Wait for order to fill (market orders should fill quickly)
+            max_wait = 5  # seconds (reduced from 10)
+            start_time = time.time()
+            order_info = None
+            
+            while time.time() - start_time < max_wait:
+                order_info = await self.get_order_info(order_id)
+                if order_info:
+                    # Check if filled
+                    if order_info.status == 'FILLED':
+                        return OrderResult(
+                            success=True,
+                            order_id=order_id,
+                            side=direction,
+                            size=order_info.filled_size,
+                            price=order_info.price,
+                            status='FILLED',
+                            filled_size=order_info.filled_size
+                        )
+                    # Check if canceled
+                    elif order_info.status == 'CANCELED':
+                        return OrderResult(
+                            success=False,
+                            order_id=order_id,
+                            error_message=f'Market order canceled: {order_info.cancel_reason}'
+                        )
+                await asyncio.sleep(0.2)
+            
+            # If we get here, order didn't fill in time
+            if order_info:
+                return OrderResult(
+                    success=False,
+                    order_id=order_id,
+                    error_message=f'Market order timeout. Status: {order_info.status}'
+                )
+            else:
+                return OrderResult(
+                    success=False,
+                    order_id=order_id,
+                    error_message='Failed to get order status'
+                )
+                
+        except Exception as e:
+            self.logger.log(f"Error placing market order: {e}", "ERROR")
+            return OrderResult(success=False, error_message=str(e))
+
+    async def place_ioc_order(self, contract_id: str, quantity: Decimal, price: Decimal, 
+                             direction: str) -> OrderResult:
+        """Place an IOC (Immediate-Or-Cancel) limit order with Paradex."""
+        from paradex_py.common.order import Order, OrderType, OrderSide
+
+        # Convert direction to OrderSide
+        if direction == 'buy':
+            order_side = OrderSide.Buy
+        elif direction == 'sell':
+            order_side = OrderSide.Sell
+        else:
+            return OrderResult(success=False, error_message=f'Invalid direction: {direction}')
+
+        # Round price to tick size
+        price = self.round_to_tick(price)
+
+        # Create IOC order
+        order = Order(
+            market=contract_id,
+            order_type=OrderType.Limit,
+            order_side=order_side,
+            size=quantity.quantize(self.order_size_increment, rounding=ROUND_HALF_UP),
+            limit_price=price,
+            instruction="IOC"  # Immediate-Or-Cancel
+        )
+
+        try:
+            # Submit order
+            order_result = self._submit_order_with_retry(order)
+            order_id = order_result.get('id')
+            
+            # Wait briefly for IOC order to process
+            max_wait = 5  # seconds
+            start_time = time.time()
+            order_info = None
+            
+            while time.time() - start_time < max_wait:
+                order_info = await self.get_order_info(order_id)
+                if order_info:
+                    # Check if filled (partially or fully)
+                    if order_info.status == 'FILLED':
+                        return OrderResult(
+                            success=True,
+                            order_id=order_id,
+                            side=direction,
+                            size=quantity,
+                            price=price,
+                            status='FILLED' if order_info.filled_size == quantity else 'PARTIALLY_FILLED',
+                            filled_size=order_info.filled_size
+                        )
+                    # Check if canceled
+                    elif order_info.status == 'CANCELED':
+                        # Check if there was any partial fill before cancellation
+                        if order_info.filled_size > 0:
+                            # Partial fill
+                            return OrderResult(
+                                success=True,
+                                order_id=order_id,
+                                side=direction,
+                                size=quantity,
+                                price=price,
+                                status='PARTIALLY_FILLED',
+                                filled_size=order_info.filled_size
+                            )
+                        else:
+                            # Not filled at all
+                            return OrderResult(
+                                success=False,
+                                order_id=order_id,
+                                side=direction,
+                                size=quantity,
+                                price=price,
+                                status='CANCELED',
+                                filled_size=Decimal('0'),
+                                error_message='IOC order not filled'
+                            )
+                await asyncio.sleep(0.1)
+            
+            # If we get here, timeout waiting for status
+            if order_info:
+                filled_size = order_info.filled_size
+                if filled_size > 0:
+                    # Partial fill before timeout
+                    return OrderResult(
+                        success=True,
+                        order_id=order_id,
+                        side=direction,
+                        size=quantity,
+                        price=price,
+                        status='PARTIALLY_FILLED',
+                        filled_size=filled_size
+                    )
+            
+            return OrderResult(
+                success=False,
+                order_id=order_id,
+                error_message='IOC order timeout'
+            )
+                
+        except Exception as e:
+            self.logger.log(f"Error placing IOC order: {e}", "ERROR")
+            return OrderResult(success=False, error_message=str(e))

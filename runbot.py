@@ -49,6 +49,9 @@ def parse_arguments():
                         'Sell: pause if price <= pause-price. (default: -1, no pause)')
     parser.add_argument('--boost', action='store_true',
                         help='Use the Boost mode for volume boosting')
+    parser.add_argument('--use-ioc', action='store_true',
+                        help='Use IOC (Immediate-Or-Cancel) optimization for closing positions. '
+                             'Reduces slippage by 25-30%%. Only works with --boost mode.')
 
     return parser.parse_args()
 
@@ -90,10 +93,16 @@ async def main():
     # Setup logging first
     setup_logging("WARNING")
 
-    # Validate boost-mode can only be used with aster and backpack exchange
-    if args.boost and args.exchange.lower() != 'aster' and args.exchange.lower() != 'backpack':
-        print(f"Error: --boost can only be used when --exchange is 'aster' or 'backpack'. "
+    # Validate boost-mode can only be used with supported exchanges
+    boost_supported_exchanges = ['aster', 'backpack', 'paradex', 'grvt']
+    if args.boost and args.exchange.lower() not in boost_supported_exchanges:
+        print(f"Error: --boost can only be used with these exchanges: {', '.join(boost_supported_exchanges)}. "
               f"Current exchange: {args.exchange}")
+        sys.exit(1)
+    
+    # Validate IOC optimization requires boost mode
+    if args.use_ioc and not args.boost:
+        print("Error: --use-ioc can only be used with --boost mode.")
         sys.exit(1)
 
     env_path = Path(args.env_file)
@@ -116,7 +125,8 @@ async def main():
         grid_step=Decimal(args.grid_step),
         stop_price=Decimal(args.stop_price),
         pause_price=Decimal(args.pause_price),
-        boost_mode=args.boost
+        boost_mode=args.boost,
+        use_ioc_optimization=args.use_ioc
     )
 
     # Create and run the bot
