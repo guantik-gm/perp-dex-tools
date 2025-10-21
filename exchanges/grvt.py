@@ -545,11 +545,17 @@ class GrvtClient(BaseExchangeClient):
     async def place_market_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
         """Place a market order with GRVT."""
         try:
-            # Place the market order using GRVT SDK
-            order_result = self.rest_client.create_market_order(
+            # GRVT SDK: Market orders are created by calling create_order with order_type="market"
+            # From pysdk source: is_market = order_type == "market" (grvt_ccxt_utils.py:455)
+            order_result = self.rest_client.create_order(
                 symbol=contract_id,
+                order_type="market",  # This sets is_market=True internally
                 side=direction,
-                amount=quantity
+                amount=quantity,
+                price=0,  # Market orders don't need limit price
+                params={
+                    'time_in_force': 'IMMEDIATE_OR_CANCEL'  # TimeInForce enum name
+                }
             )
             
             if not order_result:
@@ -627,16 +633,29 @@ class GrvtClient(BaseExchangeClient):
             while time.time() - start_time < max_wait:
                 order_info = await self.get_order_info(client_order_id=client_order_id)
                 if order_info:
-                    if order_info.status in ['FILLED', 'CANCELED']:
+                    # Use utility function to check status (handles FILLED, REJECTED, CANCELLED, CANCELED)
+                    if is_order_filled(order_info.status, order_info.cancel_reason):
+                        # Fully filled
+                        return OrderResult(
+                            success=True,
+                            order_id=order_info.order_id,
+                            side=direction,
+                            size=quantity,
+                            price=price,
+                            status='FILLED',
+                            filled_size=order_info.filled_size
+                        )
+                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
+                        # IOC was canceled/rejected, check if partially filled
                         if order_info.filled_size > 0:
-                            # Partially or fully filled
+                            # Partially filled before cancellation
                             return OrderResult(
                                 success=True,
                                 order_id=order_info.order_id,
                                 side=direction,
                                 size=quantity,
                                 price=price,
-                                status='FILLED' if order_info.filled_size == quantity else 'PARTIALLY_FILLED',
+                                status='PARTIALLY_FILLED',
                                 filled_size=order_info.filled_size
                             )
                         else:
@@ -651,13 +670,6 @@ class GrvtClient(BaseExchangeClient):
                                 filled_size=Decimal('0'),
                                 error_message='IOC order not filled'
                             )
-                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
-                        # Use utility function to check (handles REJECTED, CANCELED, CANCELLED)
-                        return OrderResult(
-                            success=False,
-                            order_id=order_info.order_id,
-                            error_message=f'IOC order canceled/rejected'
-                        )
                 await asyncio.sleep(0.1)
             
             # Timeout - check if partially filled

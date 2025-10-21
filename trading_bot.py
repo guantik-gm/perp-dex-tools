@@ -366,11 +366,47 @@ class TradingBot:
                         f"[CLOSE_MARKET] ❌ Market order failed: {market_result.error_message}",
                         "ERROR"
                     )
-                    return market_result
+                    
+                    # Check if IOC had partial fill - don't lose that information!
+                    if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
+                        self.logger.log(
+                            f"[CLOSE_IOC] ⚠️ Returning partial fill from IOC: {ioc_result.filled_size}/{quantity}",
+                            "WARN"
+                        )
+                        return OrderResult(
+                            success=True,  # IOC partially succeeded
+                            order_id=ioc_result.order_id,
+                            side=side,
+                            size=quantity,
+                            price=ioc_result.price,
+                            status='PARTIALLY_FILLED',
+                            filled_size=ioc_result.filled_size
+                        )
+                    else:
+                        # Complete failure - neither IOC nor market worked
+                        return market_result
                     
             except Exception as e:
                 self.logger.log(f"[CLOSE_MARKET] Market order error: {e}", "ERROR")
-                return OrderResult(success=False, error_message=str(e))
+                
+                # Check if IOC had partial fill - don't lose that information!
+                if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
+                    self.logger.log(
+                        f"[CLOSE_IOC] ⚠️ Returning partial fill from IOC after market error: {ioc_result.filled_size}/{quantity}",
+                        "WARN"
+                    )
+                    return OrderResult(
+                        success=True,  # IOC partially succeeded
+                        order_id=ioc_result.order_id,
+                        side=side,
+                        size=quantity,
+                        price=ioc_result.price,
+                        status='PARTIALLY_FILLED',
+                        filled_size=ioc_result.filled_size
+                    )
+                else:
+                    # Complete failure
+                    return OrderResult(success=False, error_message=str(e))
         
         # Should not reach here, but return ioc_result as fallback
         return ioc_result if ioc_result else OrderResult(success=False, error_message="No orders placed")
