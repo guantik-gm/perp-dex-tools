@@ -444,15 +444,33 @@ class GrvtClient(BaseExchangeClient):
 
         leg = legs[0]  # Get first leg
         state = order.get('state', {})
+        
+        # Get raw status and map it for consistency with WebSocket handler
+        raw_status = state.get('status', '')
+        status_map = {
+            'OPEN': 'OPEN',
+            'FILLED': 'FILLED',
+            'CANCELLED': 'CANCELED',  # British spelling -> American spelling
+            'REJECTED': 'CANCELED'
+        }
+        mapped_status = status_map.get(raw_status, raw_status)
+        
+        # Get size information
+        size = Decimal(leg.get('size', 0))
+        filled_size = (Decimal(state.get('traded_size', ['0'])[0])
+                       if isinstance(state.get('traded_size'), list) else Decimal(0))
+        
+        # Handle partially filled orders
+        if mapped_status == 'OPEN' and filled_size > 0:
+            mapped_status = 'PARTIALLY_FILLED'
 
         return OrderInfo(
             order_id=order.get('order_id', ''),
             side=leg.get('is_buying_asset', False) and 'buy' or 'sell',
-            size=Decimal(leg.get('size', 0)),
+            size=size,
             price=Decimal(leg.get('limit_price', 0)),
-            status=state.get('status', ''),
-            filled_size=(Decimal(state.get('traded_size', ['0'])[0])
-                         if isinstance(state.get('traded_size'), list) else Decimal(0)),
+            status=mapped_status,
+            filled_size=filled_size,
             remaining_size=(Decimal(state.get('book_size', ['0'])[0])
                             if isinstance(state.get('book_size'), list) else Decimal(0))
         )
@@ -483,15 +501,33 @@ class GrvtClient(BaseExchangeClient):
 
             leg = legs[0]  # Get first leg
             state = order.get('state', {})
+            
+            # Map status for consistency with WebSocket handler
+            raw_status = state.get('status', '')
+            status_map = {
+                'OPEN': 'OPEN',
+                'FILLED': 'FILLED',
+                'CANCELLED': 'CANCELED',
+                'REJECTED': 'CANCELED'
+            }
+            mapped_status = status_map.get(raw_status, raw_status)
+            
+            # Get size information
+            size = Decimal(leg.get('size', 0))
+            filled_size = (Decimal(state.get('traded_size', ['0'])[0])
+                           if isinstance(state.get('traded_size'), list) else Decimal(0))
+            
+            # Handle partially filled orders
+            if mapped_status == 'OPEN' and filled_size > 0:
+                mapped_status = 'PARTIALLY_FILLED'
 
             order_list.append(OrderInfo(
                 order_id=order.get('order_id', ''),
                 side=leg.get('is_buying_asset', False) and 'buy' or 'sell',
-                size=Decimal(leg.get('size', 0)),
+                size=size,
                 price=Decimal(leg.get('limit_price', 0)),
-                status=state.get('status', ''),
-                filled_size=(Decimal(state.get('traded_size', ['0'])[0])
-                             if isinstance(state.get('traded_size'), list) else Decimal(0)),
+                status=mapped_status,
+                filled_size=filled_size,
                 remaining_size=(Decimal(state.get('book_size', ['0'])[0])
                                 if isinstance(state.get('book_size'), list) else Decimal(0))
             ))

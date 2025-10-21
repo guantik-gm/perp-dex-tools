@@ -510,13 +510,36 @@ class ParadexClient(BaseExchangeClient):
             order_data = self.paradex.api_client.fetch_order(order_id)
             size = Decimal(order_data.get('size', 0)).quantize(self.order_size_increment, rounding=ROUND_HALF_UP)
             remaining_size = Decimal(order_data.get('remaining_size', 0))
+            
+            # Get raw status from API
+            raw_status = order_data.get('status', '')
+            
+            # Map Paradex status to our standardized status
+            # This mapping matches the WebSocket handler to ensure consistency
+            if raw_status == 'CLOSED':
+                # CLOSED can mean either FILLED or CANCELED
+                if order_data.get('cancel_reason'):
+                    mapped_status = 'CANCELED'
+                else:
+                    mapped_status = 'FILLED'
+            elif raw_status == 'NEW':
+                mapped_status = 'OPEN'
+            else:
+                # OPEN, UNTRIGGERED, etc - keep as is
+                mapped_status = raw_status
+            
+            # Check for partial fills
+            filled_size = size - remaining_size
+            if mapped_status == 'OPEN' and filled_size > 0:
+                mapped_status = 'PARTIALLY_FILLED'
+            
             return OrderInfo(
                 order_id=order_data.get('id', ''),
                 side=order_data.get('side', '').lower(),
                 size=size,
                 price=Decimal(order_data.get('price', 0)),
-                status=order_data.get('status', ''),
-                filled_size=size - remaining_size,
+                status=mapped_status,  # Use mapped status for consistency
+                filled_size=filled_size,
                 remaining_size=remaining_size,
                 cancel_reason=order_data.get('cancel_reason', '')
             )
@@ -547,14 +570,29 @@ class ParadexClient(BaseExchangeClient):
         # Filter orders for the specific market
         contract_orders = []
         for order in order_list:
+            # Map status for consistency (though active orders should only be OPEN/NEW)
+            raw_status = order.get('status', '')
+            if raw_status == 'NEW':
+                mapped_status = 'OPEN'
+            else:
+                mapped_status = raw_status
+            
+            size = Decimal(order.get('size', 0))
+            remaining_size = Decimal(order.get('remaining_size', 0))
+            filled_size = size - remaining_size
+            
+            # Check for partial fills
+            if mapped_status == 'OPEN' and filled_size > 0:
+                mapped_status = 'PARTIALLY_FILLED'
+            
             contract_orders.append(OrderInfo(
                 order_id=order.get('id', ''),
                 side=order.get('side', '').lower(),
-                size=Decimal(order.get('remaining_size', 0)),  # FIXME: This is wrong. Should be size
+                size=size,  # Fixed: use total size, not remaining_size
                 price=Decimal(order.get('price', 0)),
-                status=order.get('status', ''),
-                filled_size=Decimal(order.get('size', 0)) - Decimal(order.get('remaining_size', 0)),
-                remaining_size=Decimal(order.get('remaining_size', 0))
+                status=mapped_status,
+                filled_size=filled_size,
+                remaining_size=remaining_size
             ))
 
         return contract_orders
