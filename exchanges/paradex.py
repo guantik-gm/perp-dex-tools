@@ -10,6 +10,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from .base import BaseExchangeClient, OrderResult, OrderInfo
+from .status_utils import is_order_filled, is_order_canceled
 from helpers.logger import TradingLogger
 
 
@@ -399,27 +400,15 @@ class ParadexClient(BaseExchangeClient):
             else:
                 break
 
-        if order_status in ['OPEN']:
-            # Order successfully placed
-            return OrderResult(
-                success=True,
-                order_id=order_id,
-                side=direction,
-                size=quantity,
-                price=order_price,
-                status=order_status
-            )
-        elif order_status == 'CLOSED' and remaining_size == 0:
-            return OrderResult(
-                success=True,
-                order_id=order_id,
-                side=direction,
-                size=quantity,
-                price=order_price,
-                status=order_status
-            )
-        else:
-            raise Exception(f"[OPEN] [{order_id}] Unexpected order status: {order_status}")
+        # Order successfully placed
+        return OrderResult(
+            success=True,
+            order_id=order_id,
+            side=direction,
+            size=quantity,
+            price=order_price,
+            status=order_status
+        )
 
     async def _get_active_close_orders(self, contract_id: str) -> int:
         """Get active close orders for a contract using official SDK."""
@@ -511,35 +500,15 @@ class ParadexClient(BaseExchangeClient):
             size = Decimal(order_data.get('size', 0)).quantize(self.order_size_increment, rounding=ROUND_HALF_UP)
             remaining_size = Decimal(order_data.get('remaining_size', 0))
             
-            # Get raw status from API
-            raw_status = order_data.get('status', '')
-            
-            # Map Paradex status to our standardized status
-            # This mapping matches the WebSocket handler to ensure consistency
-            if raw_status == 'CLOSED':
-                # CLOSED can mean either FILLED or CANCELED
-                if order_data.get('cancel_reason'):
-                    mapped_status = 'CANCELED'
-                else:
-                    mapped_status = 'FILLED'
-            elif raw_status == 'NEW':
-                mapped_status = 'OPEN'
-            else:
-                # OPEN, UNTRIGGERED, etc - keep as is
-                mapped_status = raw_status
-            
-            # Check for partial fills
-            filled_size = size - remaining_size
-            if mapped_status == 'OPEN' and filled_size > 0:
-                mapped_status = 'PARTIALLY_FILLED'
-            
+            # Return original status from API (backward compatible)
+            # Do not map here to maintain compatibility with existing code
             return OrderInfo(
                 order_id=order_data.get('id', ''),
                 side=order_data.get('side', '').lower(),
                 size=size,
                 price=Decimal(order_data.get('price', 0)),
-                status=mapped_status,  # Use mapped status for consistency
-                filled_size=filled_size,
+                status=order_data.get('status', ''),  # Original status: 'NEW', 'OPEN', 'CLOSED'
+                filled_size=size - remaining_size,
                 remaining_size=remaining_size,
                 cancel_reason=order_data.get('cancel_reason', '')
             )
@@ -570,28 +539,17 @@ class ParadexClient(BaseExchangeClient):
         # Filter orders for the specific market
         contract_orders = []
         for order in order_list:
-            # Map status for consistency (though active orders should only be OPEN/NEW)
-            raw_status = order.get('status', '')
-            if raw_status == 'NEW':
-                mapped_status = 'OPEN'
-            else:
-                mapped_status = raw_status
-            
             size = Decimal(order.get('size', 0))
             remaining_size = Decimal(order.get('remaining_size', 0))
-            filled_size = size - remaining_size
             
-            # Check for partial fills
-            if mapped_status == 'OPEN' and filled_size > 0:
-                mapped_status = 'PARTIALLY_FILLED'
-            
+            # Return original status (backward compatible)
             contract_orders.append(OrderInfo(
                 order_id=order.get('id', ''),
                 side=order.get('side', '').lower(),
-                size=size,  # Fixed: use total size, not remaining_size
+                size=size,
                 price=Decimal(order.get('price', 0)),
-                status=mapped_status,
-                filled_size=filled_size,
+                status=order.get('status', ''),  # Original status: 'NEW', 'OPEN'
+                filled_size=size - remaining_size,
                 remaining_size=remaining_size
             ))
 
@@ -739,8 +697,8 @@ class ParadexClient(BaseExchangeClient):
             while time.time() - start_time < max_wait:
                 order_info = await self.get_order_info(order_id)
                 if order_info:
-                    # Check if filled
-                    if order_info.status == 'FILLED':
+                    # Use utility function to check status (handles original Paradex status: CLOSED, FILLED, etc)
+                    if is_order_filled(order_info.status, order_info.cancel_reason):
                         return OrderResult(
                             success=True,
                             order_id=order_id,
@@ -751,7 +709,7 @@ class ParadexClient(BaseExchangeClient):
                             filled_size=order_info.filled_size
                         )
                     # Check if canceled
-                    elif order_info.status == 'CANCELED':
+                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
                         return OrderResult(
                             success=False,
                             order_id=order_id,
@@ -816,8 +774,8 @@ class ParadexClient(BaseExchangeClient):
             while time.time() - start_time < max_wait:
                 order_info = await self.get_order_info(order_id)
                 if order_info:
-                    # Check if filled (partially or fully)
-                    if order_info.status == 'FILLED':
+                    # Use utility function to check status (handles original Paradex status: CLOSED, FILLED, etc)
+                    if is_order_filled(order_info.status, order_info.cancel_reason):
                         return OrderResult(
                             success=True,
                             order_id=order_id,
@@ -828,7 +786,7 @@ class ParadexClient(BaseExchangeClient):
                             filled_size=order_info.filled_size
                         )
                     # Check if canceled
-                    elif order_info.status == 'CANCELED':
+                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
                         # Check if there was any partial fill before cancellation
                         if order_info.filled_size > 0:
                             # Partial fill

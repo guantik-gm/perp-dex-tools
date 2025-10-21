@@ -12,6 +12,7 @@ from pysdk.grvt_ccxt_ws import GrvtCcxtWS
 from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType
 
 from .base import BaseExchangeClient, OrderResult, OrderInfo, query_retry
+from .status_utils import is_order_filled, is_order_canceled
 from helpers.logger import TradingLogger
 
 
@@ -445,32 +446,16 @@ class GrvtClient(BaseExchangeClient):
         leg = legs[0]  # Get first leg
         state = order.get('state', {})
         
-        # Get raw status and map it for consistency with WebSocket handler
-        raw_status = state.get('status', '')
-        status_map = {
-            'OPEN': 'OPEN',
-            'FILLED': 'FILLED',
-            'CANCELLED': 'CANCELED',  # British spelling -> American spelling
-            'REJECTED': 'CANCELED'
-        }
-        mapped_status = status_map.get(raw_status, raw_status)
-        
-        # Get size information
-        size = Decimal(leg.get('size', 0))
-        filled_size = (Decimal(state.get('traded_size', ['0'])[0])
-                       if isinstance(state.get('traded_size'), list) else Decimal(0))
-        
-        # Handle partially filled orders
-        if mapped_status == 'OPEN' and filled_size > 0:
-            mapped_status = 'PARTIALLY_FILLED'
-
+        # Return original status from API (backward compatible)
+        # Do not map here to maintain compatibility with existing code
         return OrderInfo(
             order_id=order.get('order_id', ''),
             side=leg.get('is_buying_asset', False) and 'buy' or 'sell',
-            size=size,
+            size=Decimal(leg.get('size', 0)),
             price=Decimal(leg.get('limit_price', 0)),
-            status=mapped_status,
-            filled_size=filled_size,
+            status=state.get('status', ''),  # Original status: 'OPEN', 'FILLED', 'REJECTED', 'CANCELLED'
+            filled_size=(Decimal(state.get('traded_size', ['0'])[0])
+                         if isinstance(state.get('traded_size'), list) else Decimal(0)),
             remaining_size=(Decimal(state.get('book_size', ['0'])[0])
                             if isinstance(state.get('book_size'), list) else Decimal(0))
         )
@@ -502,32 +487,15 @@ class GrvtClient(BaseExchangeClient):
             leg = legs[0]  # Get first leg
             state = order.get('state', {})
             
-            # Map status for consistency with WebSocket handler
-            raw_status = state.get('status', '')
-            status_map = {
-                'OPEN': 'OPEN',
-                'FILLED': 'FILLED',
-                'CANCELLED': 'CANCELED',
-                'REJECTED': 'CANCELED'
-            }
-            mapped_status = status_map.get(raw_status, raw_status)
-            
-            # Get size information
-            size = Decimal(leg.get('size', 0))
-            filled_size = (Decimal(state.get('traded_size', ['0'])[0])
-                           if isinstance(state.get('traded_size'), list) else Decimal(0))
-            
-            # Handle partially filled orders
-            if mapped_status == 'OPEN' and filled_size > 0:
-                mapped_status = 'PARTIALLY_FILLED'
-
+            # Return original status (backward compatible)
             order_list.append(OrderInfo(
                 order_id=order.get('order_id', ''),
                 side=leg.get('is_buying_asset', False) and 'buy' or 'sell',
-                size=size,
+                size=Decimal(leg.get('size', 0)),
                 price=Decimal(leg.get('limit_price', 0)),
-                status=mapped_status,
-                filled_size=filled_size,
+                status=state.get('status', ''),  # Original status: 'OPEN', 'FILLED', 'REJECTED', 'CANCELLED'
+                filled_size=(Decimal(state.get('traded_size', ['0'])[0])
+                             if isinstance(state.get('traded_size'), list) else Decimal(0)),
                 remaining_size=(Decimal(state.get('book_size', ['0'])[0])
                                 if isinstance(state.get('book_size'), list) else Decimal(0))
             ))
@@ -607,11 +575,12 @@ class GrvtClient(BaseExchangeClient):
                             status='FILLED',
                             filled_size=order_info.filled_size
                         )
-                    elif order_info.status in ['REJECTED', 'CANCELED']:
+                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
+                        # Use utility function to check (handles REJECTED, CANCELED, CANCELLED)
                         return OrderResult(
                             success=False,
                             order_id=order_info.order_id,
-                            error_message=f'Market order {order_info.status}: {order_info.cancel_reason}'
+                            error_message=f'Market order canceled/rejected'
                         )
                 await asyncio.sleep(0.2)
             
@@ -682,11 +651,12 @@ class GrvtClient(BaseExchangeClient):
                                 filled_size=Decimal('0'),
                                 error_message='IOC order not filled'
                             )
-                    elif order_info.status == 'REJECTED':
+                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
+                        # Use utility function to check (handles REJECTED, CANCELED, CANCELLED)
                         return OrderResult(
                             success=False,
                             order_id=order_info.order_id,
-                            error_message=f'IOC order rejected: {order_info.cancel_reason}'
+                            error_message=f'IOC order canceled/rejected'
                         )
                 await asyncio.sleep(0.1)
             
