@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Optional
 
 from exchanges import ExchangeFactory
+from exchanges.base import OrderResult
 from helpers import TradingLogger
 from helpers.lark_bot import LarkBot
 from helpers.telegram_bot import TelegramBot
