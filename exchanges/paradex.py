@@ -166,6 +166,10 @@ class ParadexClient(BaseExchangeClient):
         """Get the exchange name."""
         return "paradex"
 
+    def set_stats(self, stats) -> None:
+        """Set the stats object for tracking fees from WebSocket fills."""
+        self._stats = stats
+
     def setup_order_update_handler(self, handler) -> None:
         """Setup order update handler for WebSocket."""
         self._order_update_handler = handler
@@ -222,11 +226,54 @@ class ParadexClient(BaseExchangeClient):
                                 'filled_size': filled_size
                             })
 
+            elif ws_channel == ParadexWebsocketChannel.FILLS:
+                # Extract fill data including fee and liquidity role
+                fill_id = data.get("id")
+                order_id = data.get("order_id")
+                market = data.get("market")
+                size = data.get("size")
+                price = data.get("price")
+                side = data.get("side", "").lower()
+                fee = data.get("fee")
+                liquidity = data.get("liquidity")  # Get liquidity role (Maker/Taker)
+
+                if market != self.config.contract_id:
+                    return
+
+                # Record fee to stats if available
+                if fee and hasattr(self, '_stats') and self._stats:
+                    try:
+                        fee_decimal = abs(Decimal(fee))  # Use abs to handle rebates
+                        self._stats.record_actual_fee(fee_decimal)
+                        self.logger.log(f"Recorded fill fee: ${fee_decimal} from fill_id={fill_id}", "DEBUG")
+
+                        # Also log fill to CSV with fee information
+                        if size and price:
+                            size_decimal = Decimal(size)
+                            price_decimal = Decimal(price)
+
+                            # Calculate fee rate for verification: fee_rate = fee / (size * price)
+                            notional_value = size_decimal * price_decimal
+                            fee_rate = (fee_decimal / notional_value * Decimal(100)) if notional_value > 0 else Decimal('0')
+
+                            self.logger.log_transaction(
+                                order_id=order_id or fill_id,
+                                side=side,
+                                quantity=size_decimal,
+                                price=price_decimal,
+                                status="FILLED",
+                                fee=fee_decimal,
+                                fee_rate=fee_rate,  # Fee rate as percentage
+                                liquidity_role=liquidity  # Pass liquidity role (Maker/Taker)
+                            )
+                    except Exception as e:
+                        self.logger.log(f"Error recording fill fee: {e}", "WARN")
+
         # Store the handler for later use
         self._ws_order_update_handler = order_update_handler
 
     async def _setup_websocket_subscription(self) -> None:
-        """Setup WebSocket subscription for order updates."""
+        """Setup WebSocket subscription for order updates and fills."""
         if not hasattr(self, '_ws_order_update_handler'):
             return
 
@@ -241,19 +288,28 @@ class ParadexClient(BaseExchangeClient):
             self._ws_connected = True
             self.logger.log("WebSocket connected for order monitoring", "INFO")
 
-        # Subscribe to orders channel for the specific market
+        # Subscribe to orders and fills channels for the specific market
         from paradex_py.api.ws_client import ParadexWebsocketChannel
 
         contract_id = self.config.contract_id
         try:
+            # Subscribe to ORDERS channel
             await self.paradex.ws_client.subscribe(
                 ParadexWebsocketChannel.ORDERS,
                 callback=self._ws_order_update_handler,
                 params={"market": contract_id}
             )
             self.logger.log(f"Subscribed to order updates for {contract_id}", "INFO")
+
+            # Subscribe to FILLS channel for real-time fee tracking
+            await self.paradex.ws_client.subscribe(
+                ParadexWebsocketChannel.FILLS,
+                callback=self._ws_order_update_handler,
+                params={"market": contract_id}
+            )
+            self.logger.log(f"Subscribed to fill updates for {contract_id}", "INFO")
         except Exception as e:
-            self.logger.log(f"Failed to subscribe to order updates: {e}", "ERROR")
+            self.logger.log(f"Failed to subscribe to order/fill updates: {e}", "ERROR")
 
     @retry(
         stop=stop_after_attempt(5),
