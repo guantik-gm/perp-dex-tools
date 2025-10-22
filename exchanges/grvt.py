@@ -128,6 +128,10 @@ class GrvtClient(BaseExchangeClient):
         """Get the exchange name."""
         return "grvt"
 
+    def set_stats(self, stats) -> None:
+        """Set the stats object for tracking fees from WebSocket fills."""
+        self._stats = stats
+
     def setup_order_update_handler(self, handler) -> None:
         """Setup order update handler for WebSocket."""
         self._order_update_handler = handler
@@ -193,12 +197,71 @@ class GrvtClient(BaseExchangeClient):
                                 self.logger.log(f"Ignoring order update with status: {mapped_status}", "DEBUG")
                         else:
                             self.logger.log(f"Order update missing order_id or status: {data}", "DEBUG")
+                    elif isinstance(data, dict):
+                        # Handle fill messages for fee tracking (feed without legs)
+                        # Check if this is a fill message
+                        if 'trade_id' in data or 'fee' in data:
+                            # Extract fill data
+                            instrument = data.get('instrument', '')
+                            fee = data.get('fee', None)
+                            fee_rate_raw = data.get('fee_rate', None)  # GRVT may provide fee_rate directly
+                            size = data.get('size', None)
+                            price = data.get('price', None)
+                            is_buyer = data.get('is_buyer', False)
+                            is_taker = data.get('is_taker', None)  # Get is_taker field for liquidity role
+                            trade_id = data.get('trade_id', '')
+                            order_id = data.get('order_id', '')
+
+                            # Only process fills for our contract
+                            if instrument == self.config.contract_id and fee is not None:
+                                # Record fee to stats if available
+                                if hasattr(self, '_stats') and self._stats:
+                                    try:
+                                        fee_decimal = abs(Decimal(fee))  # Use abs to handle rebates
+                                        self._stats.record_actual_fee(fee_decimal)
+                                        self.logger.log(f"Recorded fill fee: ${fee_decimal} from trade_id={trade_id}", "DEBUG")
+
+                                        # Also log fill to CSV with fee information
+                                        if size and price:
+                                            side = 'buy' if is_buyer else 'sell'
+                                            size_decimal = Decimal(size)
+                                            price_decimal = Decimal(price)
+
+                                            # Use fee_rate from message if available, otherwise calculate
+                                            if fee_rate_raw is not None:
+                                                fee_rate = abs(Decimal(fee_rate_raw)) * Decimal(100)  # Convert to percentage
+                                            else:
+                                                # Calculate fee rate: fee_rate = fee / (size * price)
+                                                notional_value = size_decimal * price_decimal
+                                                fee_rate = (fee_decimal / notional_value * Decimal(100)) if notional_value > 0 else Decimal('0')
+
+                                            # Determine liquidity role from is_taker field
+                                            liquidity_role = None
+                                            if is_taker is not None:
+                                                liquidity_role = 'Taker' if is_taker else 'Maker'
+
+                                            self.logger.log_transaction(
+                                                order_id=order_id or trade_id,
+                                                side=side,
+                                                quantity=size_decimal,
+                                                price=price_decimal,
+                                                status="FILLED",
+                                                fee=fee_decimal,
+                                                fee_rate=fee_rate,  # Fee rate as percentage
+                                                liquidity_role=liquidity_role  # Pass liquidity role (Maker/Taker)
+                                            )
+                                    except Exception as e:
+                                        self.logger.log(f"Error recording fill fee: {e}", "WARN")
+                            else:
+                                self.logger.log(f"Fill message for different contract or missing fee: {instrument}", "DEBUG")
+                        else:
+                            self.logger.log(f"Feed message without order legs or fill data: {data}", "DEBUG")
                     else:
-                        self.logger.log(f"Order update data is not dict or missing legs: {data}", "DEBUG")
+                        self.logger.log(f"Feed data is not a dict: {data}", "DEBUG")
                 else:
-                    # Handle other message types (position, fill, etc.)
+                    # Handle messages without 'feed' field
                     method = message.get('method', 'unknown')
-                    self.logger.log(f"Received non-order message: {method}", "DEBUG")
+                    self.logger.log(f"Received non-feed message: {method}", "DEBUG")
 
             except Exception as e:
                 self.logger.log(f"Error handling order update: {e}", "ERROR")
@@ -219,8 +282,9 @@ class GrvtClient(BaseExchangeClient):
             self.logger.log("WebSocket not ready yet; will subscribe after connect()", "INFO")
 
     async def _subscribe_to_orders(self, callback):
-        """Subscribe to order updates asynchronously."""
+        """Subscribe to order and fill updates asynchronously."""
         try:
+            # Subscribe to order updates
             await self._ws_client.subscribe(
                 stream="order",
                 callback=callback,
@@ -229,6 +293,16 @@ class GrvtClient(BaseExchangeClient):
             )
             await asyncio.sleep(0)  # Small delay like in test file
             self.logger.log(f"Successfully subscribed to order updates for {self.config.contract_id}", "INFO")
+
+            # Subscribe to fill updates for real-time fee tracking
+            await self._ws_client.subscribe(
+                stream="fill",
+                callback=callback,
+                ws_end_point_type=GrvtWSEndpointType.TRADE_DATA_RPC_FULL,
+                params={"instrument": self.config.contract_id}
+            )
+            await asyncio.sleep(0)
+            self.logger.log(f"Successfully subscribed to fill updates for {self.config.contract_id}", "INFO")
         except Exception as e:
             self.logger.log(f"Error in subscription task: {e}", "ERROR")
 

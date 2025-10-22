@@ -93,11 +93,27 @@ class TradingLogger:
         else:
             self.logger.info(formatted_message)
 
-    def log_transaction(self, order_id: str, side: str, quantity: Decimal, price: Decimal, status: str):
-        """Log a transaction to CSV file."""
+    def log_transaction(self, order_id: str, side: str, quantity: Decimal, price: Decimal, status: str, fee: Decimal = None, fee_rate: Decimal = None, liquidity_role: str = None):
+        """
+        Log a transaction to CSV file.
+
+        Args:
+            order_id: Order ID
+            side: Trade side (buy/sell)
+            quantity: Trade quantity
+            price: Trade price
+            status: Order status
+            fee: Transaction fee (optional, for compatibility)
+            fee_rate: Transaction fee rate (optional, for post-verification)
+            liquidity_role: Liquidity role (Maker/Taker, optional)
+        """
         try:
             timestamp = datetime.now(self.timezone).strftime("%Y-%m-%d %H:%M:%S")
-            row = [timestamp, order_id, side, quantity, price, status]
+            # Add fee, fee_rate, and liquidity_role to the row, default if not provided
+            fee_value = fee if fee is not None else Decimal('0')
+            fee_rate_value = fee_rate if fee_rate is not None else Decimal('0')
+            liquidity_role_value = liquidity_role if liquidity_role is not None else ''
+            row = [timestamp, order_id, side, quantity, price, status, fee_value, fee_rate_value, liquidity_role_value]
 
             # Check if file exists to write headers
             file_exists = os.path.isfile(self.log_file)
@@ -105,7 +121,7 @@ class TradingLogger:
             with open(self.log_file, 'a', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 if not file_exists:
-                    writer.writerow(['Timestamp', 'OrderID', 'Side', 'Quantity', 'Price', 'Status'])
+                    writer.writerow(['Timestamp', 'OrderID', 'Side', 'Quantity', 'Price', 'Status', 'Fee', 'FeeRate', 'LiquidityRole'])
                 writer.writerow(row)
 
         except Exception as e:

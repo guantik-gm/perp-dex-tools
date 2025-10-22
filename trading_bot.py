@@ -12,7 +12,7 @@ from typing import Optional
 
 from exchanges import ExchangeFactory
 from exchanges.base import OrderResult
-from helpers import TradingLogger
+from helpers import TradingLogger, TradingStats
 from helpers.lark_bot import LarkBot
 from helpers.telegram_bot import TelegramBot
 
@@ -99,6 +99,9 @@ class TradingBot:
         self.cumulative_quote_volume = Decimal('0')
         self.last_report_time = 0
         self.report_interval = 1800
+        
+        # Enhanced statistics tracking
+        self.stats = TradingStats()
 
         # Register order callback
         self._setup_websocket_handlers()
@@ -288,6 +291,13 @@ class TradingBot:
         # Try IOC limit order first
         try:
             self.logger.log(f"[CLOSE_IOC] Attempting IOC order: {quantity} @ {ioc_price}", "INFO")
+            
+            # Record IOC attempt (protected)
+            try:
+                self.stats.record_ioc_attempt(quantity)
+            except Exception:
+                pass
+            
             ioc_result = await self.exchange_client.place_ioc_order(
                 self.config.contract_id,
                 quantity,
@@ -305,6 +315,11 @@ class TradingBot:
                         f"[CLOSE_IOC] ✅ IOC fully filled: {filled_size} @ {ioc_result.price}", 
                         "INFO"
                     )
+                    # Record IOC success (protected)
+                    try:
+                        self.stats.record_ioc_result(filled_size, quantity, False)
+                    except Exception:
+                        pass
                     return ioc_result
                 elif filled_size > 0:
                     # Partially filled
@@ -339,6 +354,13 @@ class TradingBot:
                         f"[CLOSE_MARKET] ✅ Market order filled: {market_result.filled_size} @ {market_result.price}",
                         "INFO"
                     )
+                    
+                    # Record IOC result with market fallback (protected)
+                    if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
+                        try:
+                            self.stats.record_ioc_result(ioc_result.filled_size, quantity, True)
+                        except Exception:
+                            pass
                     
                     # Combine IOC and market results
                     if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
@@ -689,6 +711,13 @@ class TradingBot:
         self.cumulative_trade_count += 1
         self.cumulative_base_volume += size
         self.cumulative_quote_volume += size * price
+        
+        # Enhanced statistics (protected to not affect core logic)
+        try:
+            self.stats.record_trade(size, price)
+        except Exception:
+            pass  # Silently ignore stats errors
+        
         alerts = {threshold: False for threshold in self.loss_alert_thresholds}
         self.open_positions.append({
             "size": size,
@@ -703,6 +732,12 @@ class TradingBot:
         self.cumulative_trade_count += 1
         self.cumulative_base_volume += size
         self.cumulative_quote_volume += size * price
+        
+        # Enhanced statistics (protected to not affect core logic)
+        try:
+            self.stats.record_trade(size, price)
+        except Exception:
+            pass  # Silently ignore stats errors
 
         remaining = size
         while remaining > 0 and self.open_positions:
@@ -761,6 +796,17 @@ class TradingBot:
         if self.last_report_time != 0 and now_ts - self.last_report_time < self.report_interval:
             return
 
+        try:
+            await self._send_enhanced_report(position_amt, active_close_amount)
+        except Exception as e:
+            # Fallback to simple report if enhanced report fails
+            self.logger.log(f"Enhanced report failed, using fallback: {e}", "WARN")
+            await self._send_simple_report(position_amt, active_close_amount)
+        
+        self.last_report_time = now_ts
+    
+    async def _send_simple_report(self, position_amt: Decimal, active_close_amount: Decimal):
+        """Fallback simple report (original format)"""
         active_close_count = len(self.active_close_orders)
         remaining_capacity = max(self.config.max_orders - active_close_count, 0)
         lines = [
@@ -772,10 +818,107 @@ class TradingBot:
             f"- 当前持仓笔数: {len(self.open_positions)}",
             f"- 累计交易次数: {self.cumulative_trade_count}",
         ]
-
         await self.send_notification("\n".join(lines))
-        self.last_report_time = now_ts
+    
+    async def _send_enhanced_report(self, position_amt: Decimal, active_close_amount: Decimal):
+        """Enhanced report with detailed statistics (Boost mode optimized)"""
+        active_close_count = len(self.active_close_orders)
+        
+        # Get market prices (protected)
+        try:
+            best_bid, best_ask = await self.exchange_client.fetch_bbo_prices(self.config.contract_id)
+            mid_price = (best_bid + best_ask) / 2
+            spread = best_ask - best_bid
+            spread_pct = (spread / mid_price * 100) if mid_price > 0 else Decimal('0')
+            self.stats.record_price_sample(best_bid, best_ask)
+        except:
+            best_bid = best_ask = mid_price = spread = spread_pct = Decimal('0')
 
+        # Build report
+        mode_label = "Boost刷量" if self.config.boost_mode else "网格交易"
+        report_lines = [
+            f"📈 [{mode_label}报告] {self.config.exchange.upper()}_{self.config.ticker.upper()}",
+            "━━━━━━━━━━━━━━━━━━━━━━",
+            f"⏰ 报告时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"🕐 运行时长: {self.stats.get_runtime_formatted()}",
+            "",
+            "【交易成果】💎",
+            f"├─ 累计交易: {self.cumulative_trade_count}次",
+            f"├─ 成交量(Base): {self._fmt_decimal(self.cumulative_base_volume, 4)}",
+            f"├─ 成交量(Quote): ${self._fmt_decimal(self.cumulative_quote_volume, 2)}",
+            f"├─ 平均频率: {self.stats.get_trades_per_hour():.1f}次/小时",
+            f"└─ 平均单笔: {self._fmt_decimal(self.stats.get_avg_trade_size(), 4)}",
+        ]
+        
+        # IOC statistics (if enabled and has data)
+        if self.config.use_ioc_optimization and self.stats.ioc_attempt_count > 0:
+            report_lines.extend([
+                "",
+                "【IOC优化】✨",
+                f"├─ IOC尝试: {self.stats.ioc_attempt_count}次",
+                f"├─ 完全成交: {self.stats.ioc_full_fill_count}次 ({self.stats.get_ioc_full_fill_rate():.1f}%)",
+                f"├─ 部分成交: {self.stats.ioc_partial_fill_count}次",
+                f"├─ 失败转Market: {self.stats.market_fallback_count}次",
+                f"├─ IOC成功率: {self.stats.get_ioc_success_rate():.1f}%",
+                f"└─ 平均成交率: {self.stats.get_ioc_avg_fill_rate():.1f}%",
+            ])
+
+        # Position check (anomaly detection) - 根据 boost 模式调整判断逻辑
+        if self.config.boost_mode:
+            # Boost 模式：应该立即平仓，持仓和平仓单都应该接近0
+            position_status = "✅" if position_amt <= self.config.quantity * 2 else "⚠️ 异常"
+            orders_status = "✅" if active_close_count == 0 else "⚠️ 异常"
+            expected_state = "持仓和平仓单都应接近0"
+        else:
+            # 非 Boost 模式：会有挂单，持仓可能积累
+            # 持仓不超过 max_orders * quantity 视为正常
+            max_normal_position = self.config.quantity * self.config.max_orders
+            position_status = "✅" if position_amt <= max_normal_position else "⚠️ 异常"
+            # 活跃平仓单数量不超过 max_orders 视为正常
+            orders_status = "✅" if active_close_count <= self.config.max_orders else "⚠️ 异常"
+            expected_state = f"平仓单≤{self.config.max_orders}, 持仓≤{self._fmt_decimal(max_normal_position, 4)}"
+
+        report_lines.extend([
+            "",
+            "【仓位检查】",
+            f"├─ 当前持仓: {self._fmt_decimal(position_amt, 4)} {position_status}",
+            f"├─ 活跃平仓单: {active_close_count}单 {orders_status}",
+            f"├─ 预期状态: {expected_state}",
+            f"└─ 总体状态: {'✅ 正常' if position_status == '✅' and orders_status == '✅' else '⚠️ 检测到异常，请关注'}",
+        ])
+
+        # Market info
+        if mid_price > 0:
+            report_lines.extend([
+                "",
+                "【市场行情】",
+                f"├─ 最佳买价: ${self._fmt_decimal(best_bid, 2)}",
+                f"├─ 最佳卖价: ${self._fmt_decimal(best_ask, 2)}",
+                f"├─ 价差: ${self._fmt_decimal(spread, 2)} ({self._fmt_decimal(spread_pct, 3)}%)",
+                f"└─ 中间价: ${self._fmt_decimal(mid_price, 2)}",
+            ])
+
+        # Note: Fees are now tracked in real-time from WebSocket fills
+        # No need to query REST API before each report
+        # The _query_actual_fees() method is kept as a backup for historical data
+
+        # Cost analysis (with actual fee data from WebSocket fills)
+        if self.stats.actual_total_fee > 0:
+            wear_rate = self.stats.get_wear_rate(self.cumulative_quote_volume)
+            avg_fee = self.stats.get_avg_fee_per_trade()
+
+            report_lines.extend([
+                "",
+                "【成本分析】💰",
+                f"├─ 实际手续费: ${self._fmt_decimal(self.stats.actual_total_fee, 2)}",
+                f"├─ 磨损率: {self._fmt_decimal(wear_rate, 3)}% (万{int(wear_rate * 100)})",
+                f"├─ 平均单笔: ${self._fmt_decimal(avg_fee, 4)}",
+                f"└─ 数据来源: WebSocket实时更新",
+            ])
+        
+        # Send report
+        await self.send_notification("\n".join(report_lines))
+    
     async def _meet_grid_step_condition(self) -> bool:
         if self.active_close_orders:
             picker = min if self.config.direction == "buy" else max
@@ -874,6 +1017,12 @@ class TradingBot:
 
             # Capture the running event loop for thread-safe callbacks
             self.loop = asyncio.get_running_loop()
+
+            # Pass stats to exchange client for real-time fee tracking from WebSocket
+            if hasattr(self.exchange_client, 'set_stats'):
+                self.exchange_client.set_stats(self.stats)
+                self.logger.log("Stats object passed to exchange client for real-time fee tracking", "INFO")
+
             # Connect to exchange
             await self.exchange_client.connect()
 
