@@ -16,7 +16,7 @@ import sys
 
 # Configuration
 POSITION_AGGREGATION_MINUTES = 2  # Orders within 2 min = same position (both DEXs)
-HEDGE_MATCHING_MINUTES = 5        # Positions within 5 min = hedge pair
+HEDGE_MATCHING_MINUTES = 30       # Positions within 30 min = hedge pair (手动操作)
 LIGHTER_DATE_FILTER = datetime(2025, 10, 18)  # Filter Lighter records from this date
 
 
@@ -110,8 +110,8 @@ def parse_edgex_csv(filepath: str) -> pd.DataFrame:
 
     df = df.rename(columns=column_mapping)
 
-    # Clean Quantity column (remove "ETH" or "BTC" suffix)
-    df['Quantity'] = df['Quantity'].astype(str).str.replace(' ETH', '').str.replace(' BTC', '').str.replace(',', '').astype(float)
+    # Clean Quantity column (remove any crypto symbol suffix)
+    df['Quantity'] = df['Quantity'].astype(str).str.replace(r'\s+[A-Z]+$', '', regex=True).str.replace(',', '').astype(float)
 
     # Clean numeric columns (remove commas and convert)
     numeric_cols = ['EntryPrice', 'ExitPrice', 'ClosedPnL', 'OpenFee', 'CloseFee', 'FundingFee']
@@ -214,56 +214,135 @@ def aggregate_lighter_orders(df: pd.DataFrame) -> List[Position]:
     return positions
 
 
+def aggregate_by_entry_price(records: List[dict], time_limit: int = 60) -> List[dict]:
+    """
+    按入场价格聚合订单（识别分批平仓）
+
+    关键逻辑：相同入场价格 + 同币种 + 同方向 = 同一仓位的分批平仓
+
+    Args:
+        records: 待聚合的记录列表
+        time_limit: 最大时间跨度（分钟），默认60分钟
+
+    Returns:
+        聚合后的记录列表
+    """
+    # 按（币种、方向、入场价格）分组
+    groups = {}
+
+    for record in records:
+        # 使用入场价格作为分组键（保留2位小数以处理浮点误差）
+        entry_price_key = round(record['entry_price'], 2)
+        key = (record['asset'], record['direction'], entry_price_key)
+
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(record)
+
+    aggregated = []
+    price_groups_found = 0
+
+    for key, group in groups.items():
+        if len(group) == 1:
+            # 单个订单直接返回
+            aggregated.append(group[0])
+        else:
+            # 检查时间跨度
+            times = [r['close_time'] for r in group]
+            time_span = (max(times) - min(times)).total_seconds() / 60
+
+            if time_span <= time_limit:
+                # 聚合分批订单
+                price_groups_found += 1
+                total_size = sum(r['size'] for r in group)
+                total_pnl = sum(r['pnl'] for r in group)
+                total_open_fee = sum(r['open_fee'] for r in group)
+                total_close_fee = sum(r['close_fee'] for r in group)
+                total_funding_fee = sum(r['funding_fee'] for r in group)
+
+                # 加权平均出场价格
+                weighted_exit = sum(r['exit_price'] * r['size'] for r in group) / total_size
+
+                aggregated_record = {
+                    'asset': key[0],
+                    'direction': key[1],
+                    'entry_price': key[2],  # 相同的入场价
+                    'size': total_size,
+                    'exit_price': weighted_exit,
+                    'pnl': total_pnl,
+                    'open_fee': total_open_fee,
+                    'close_fee': total_close_fee,
+                    'funding_fee': total_funding_fee,
+                    'close_time': min(times)  # 使用最早时间
+                }
+
+                print(f"  🔗 价格聚合: {key[0]} {key[1]} @ ${key[2]:.2f}")
+                print(f"     {len(group)}笔分批 跨度{time_span:.1f}分钟 总计{total_size:.4f}")
+
+                aggregated.append(aggregated_record)
+            else:
+                # 时间跨度太大，不聚合
+                aggregated.extend(group)
+
+    if price_groups_found > 0:
+        print(f"   ✓ 价格聚合: 发现 {price_groups_found} 组分批平仓")
+
+    return aggregated
+
+
 def convert_edgex_to_positions(df: pd.DataFrame) -> List[Position]:
     """
     Convert Edgex aggregated position data to Position objects
-    Edgex data is already aggregated PER ORDER, but multiple orders at same time
-    should be combined into one position
+    IMPROVED: Pre-aggregate orders at the exact same second before time-window aggregation
     NOTE: Edgex '买入/卖出' is close action, not position direction!
-    Need to infer actual position from price movement and PnL
     """
     print("\n🔧 Converting and aggregating Edgex positions...")
 
-    # First pass: infer directions for all rows
-    temp_positions = []
-    for _, row in df.iterrows():
-        # Extract asset from contract
-        contract = row['Contract']
-        if 'ETH' in contract:
-            asset = 'ETH'
-        elif 'BTC' in contract:
-            asset = 'BTC'
-        else:
-            asset = contract.replace('USDT永续', '').replace('USDT', '').replace('USD', '')
+    # STEP 1: Pre-aggregate orders at the exact same second (fixes Match #14 issue)
+    df['time_second'] = df['OrderTime_UTC'].dt.floor('S')  # Round to nearest second
 
-        # Edgex '买入/卖出' represents CLOSE action (not open action)
-        # "买入" (Buy) = Close Short position → original position was SHORT
-        # "卖出" (Sell) = Close Long position → original position was LONG
-        close_action = row['Type']
+    # Extract asset
+    df['asset'] = df['Contract'].str.replace('USDT永续', '').str.replace('USDT', '').str.replace('USD', '')
 
-        if close_action == '买入':  # Buy to close = was Short
-            direction = 'Short'
-        else:  # '卖出' = Sell to close = was Long
-            direction = 'Long'
+    # Infer direction from close action
+    df['direction'] = df['Type'].apply(lambda x: 'Short' if x == '买入' else 'Long')
 
-        temp_positions.append({
+    pre_aggregated = []
+    same_second_groups = 0
+
+    for (asset, direction, time_sec), group in df.groupby(['asset', 'direction', 'time_second']):
+        if len(group) > 1:
+            same_second_groups += 1
+            print(f"  🔗 聚合同秒订单: {asset} {direction} @ {time_sec.strftime('%H:%M:%S')} ({len(group)}条)")
+
+        # Aggregate all orders at this exact second
+        total_qty = group['Quantity'].sum()
+
+        record = {
             'asset': asset,
             'direction': direction,
-            'size': abs(row['Quantity']),
-            'entry_price': row['EntryPrice'],
-            'exit_price': row['ExitPrice'],
-            'pnl': row['ClosedPnL'],
-            'open_fee': row['OpenFee'],
-            'close_fee': row['CloseFee'],
-            'funding_fee': row['FundingFee'],
-            'close_time': row['OrderTime_UTC']
-        })
+            'size': total_qty,
+            'entry_price': (group['EntryPrice'] * group['Quantity']).sum() / total_qty,
+            'exit_price': (group['ExitPrice'] * group['Quantity']).sum() / total_qty,
+            'pnl': group['ClosedPnL'].sum(),
+            'open_fee': group['OpenFee'].sum(),
+            'close_fee': group['CloseFee'].sum(),
+            'funding_fee': group['FundingFee'].sum(),
+            'close_time': time_sec
+        }
+        pre_aggregated.append(record)
 
-    # Second pass: aggregate positions within 1-minute windows
+    if same_second_groups > 0:
+        print(f"   ✓ 预聚合: {len(df)} 条原始订单 → {len(pre_aggregated)} 个同秒聚合仓位")
+
+    # STEP 2: Price-based aggregation (识别分批平仓)
+    pre_aggregated = aggregate_by_entry_price(pre_aggregated, time_limit=60)
+
+    # STEP 3: Time-window aggregation (2-minute window)
     positions = []
     processed_indices = set()
 
-    for i, anchor in enumerate(temp_positions):
+    for i, anchor in enumerate(pre_aggregated):
         if i in processed_indices:
             continue
 
@@ -271,7 +350,7 @@ def convert_edgex_to_positions(df: pd.DataFrame) -> List[Position]:
 
         # Find all positions within 2 minutes with same asset and direction
         group_indices = []
-        for j, pos in enumerate(temp_positions):
+        for j, pos in enumerate(pre_aggregated):
             if j in processed_indices:
                 continue
 
@@ -282,20 +361,20 @@ def convert_edgex_to_positions(df: pd.DataFrame) -> List[Position]:
 
         # Aggregate the group
         if group_indices:
-            total_size = sum(temp_positions[idx]['size'] for idx in group_indices)
-            total_pnl = sum(temp_positions[idx]['pnl'] for idx in group_indices)
-            total_open_fee = sum(temp_positions[idx]['open_fee'] for idx in group_indices)
-            total_close_fee = sum(temp_positions[idx]['close_fee'] for idx in group_indices)
-            total_funding_fee = sum(temp_positions[idx]['funding_fee'] for idx in group_indices)
+            total_size = sum(pre_aggregated[idx]['size'] for idx in group_indices)
+            total_pnl = sum(pre_aggregated[idx]['pnl'] for idx in group_indices)
+            total_open_fee = sum(pre_aggregated[idx]['open_fee'] for idx in group_indices)
+            total_close_fee = sum(pre_aggregated[idx]['close_fee'] for idx in group_indices)
+            total_funding_fee = sum(pre_aggregated[idx]['funding_fee'] for idx in group_indices)
 
             # Weighted average prices
-            weighted_entry = sum(temp_positions[idx]['entry_price'] * temp_positions[idx]['size']
+            weighted_entry = sum(pre_aggregated[idx]['entry_price'] * pre_aggregated[idx]['size']
                                 for idx in group_indices) / total_size
-            weighted_exit = sum(temp_positions[idx]['exit_price'] * temp_positions[idx]['size']
+            weighted_exit = sum(pre_aggregated[idx]['exit_price'] * pre_aggregated[idx]['size']
                                for idx in group_indices) / total_size
 
             # Use earliest close time
-            earliest_close = min(temp_positions[idx]['close_time'] for idx in group_indices)
+            earliest_close = min(pre_aggregated[idx]['close_time'] for idx in group_indices)
 
             position = Position(
                 dex='Edgex',
@@ -313,7 +392,7 @@ def convert_edgex_to_positions(df: pd.DataFrame) -> List[Position]:
             positions.append(position)
             processed_indices.update(group_indices)
 
-    print(f"   ✓ Aggregated {len(df)} Edgex orders into {len(positions)} positions")
+    print(f"   ✓ 最终聚合: {len(pre_aggregated)} 个同秒仓位 → {len(positions)} 个Edgex仓位")
     return positions
 
 
@@ -321,11 +400,11 @@ def match_positions(lighter_positions: List[Position],
                    edgex_positions: List[Position]) -> tuple[List[MatchedHedge], List[Position], List[Position]]:
     """
     Match hedged positions between Lighter and Edgex
-    Criteria: same asset, opposite directions, close times within 5 minutes
+    Criteria: same asset, opposite directions, close times within 30 minutes
     NOTE: Edgex CSV only has close time, not open time!
     Returns: (matches, unmatched_lighter, unmatched_edgex)
     """
-    print(f"\n🔗 Matching hedge pairs (5-min close time window, opposite directions)...")
+    print(f"\n🔗 Matching hedge pairs (30-min close time window, opposite directions)...")
     matches = []
     matched_lighter_indices = set()
     matched_edgex_indices = set()
@@ -462,13 +541,14 @@ def main():
     print("=" * 70)
     print("Hedged Position Analysis - Lighter & Edgex DEX (v2)")
     print("Timezone: Lighter=UTC, Edgex=UTC+8→UTC")
-    print("Position Aggregation: 2-min window | Hedge Matching: 5-min window")
+    print("Position Aggregation: 2-min window | Hedge Matching: 30-min window")
     print("=" * 70)
 
     # File paths
-    lighter_csv = "/Users/chiangguantik/Downloads/lighter-trade-export-2025-10-19T13_35_14.566Z-UTC.csv"
-    edgex_csv = "/Users/chiangguantik/Downloads/Edgex-Derivatives-USDTPerp-ClosePnL-20251019213616.csv"
-    output_csv = "/Users/chiangguantik/Downloads/hedge_friction_analysis.csv"
+    script_dir = "/Volumes/SSD1T/code/bc/perp-dex-tools/hedge_analysis"
+    lighter_csv = f"{script_dir}/lighter-trade-export-2025-10-23T02_55_04.152Z-UTC.csv"
+    edgex_csv = f"{script_dir}/Edgex-Derivatives-USDTPerp-ClosePnL-20251023111118.csv"
+    output_csv = f"{script_dir}/hedge_friction_analysis.csv"
 
     try:
         # Step 1: Parse CSV files
