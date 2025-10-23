@@ -229,6 +229,9 @@ class TradingBot:
             self.order_filled_amount = 0.0
 
             # Place the order
+            # 等待 WebSocket 事件同步，避免上一订单状态未更新导致重复下单
+            await asyncio.sleep(0.2)
+
             order_result = await self.exchange_client.place_open_order(
                 self.config.contract_id,
                 self.config.quantity,
@@ -388,7 +391,23 @@ class TradingBot:
                         f"[CLOSE_MARKET] ❌ Market order failed: {market_result.error_message}",
                         "ERROR"
                     )
-                    
+
+                    # 兜底的 MARKET 订单失败，统一触发 TG 告警
+                    ioc_filled = ioc_result.filled_size if (ioc_result and ioc_result.success) else 0
+                    remaining = quantity - ioc_filled
+                    alert_msg = (
+                        f"⚠️ [{self.config.exchange.upper()}_{self.config.contract}] "
+                        f"兜底平仓订单失败，请手动处理！\n\n"
+                        f"IOC 成交: {ioc_filled}/{quantity}\n"
+                        f"剩余数量: {remaining}\n"
+                        f"失败原因: {market_result.error_message}\n\n"
+                        f"当前可能有未平仓位，请检查并手动平仓！"
+                    )
+                    try:
+                        await self.send_notification(alert_msg)
+                    except Exception as e:
+                        self.logger.log(f"Failed to send TG alert: {e}", "ERROR")
+
                     # Check if IOC had partial fill - don't lose that information!
                     if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
                         self.logger.log(
@@ -594,16 +613,31 @@ class TradingBot:
                             order_info = await self.exchange_client.get_order_info(order_id)
                             self.order_filled_amount = order_info.filled_size
 
+            # 如果有成交量，需要平仓（部分成交或完全成交）
             if self.order_filled_amount > 0:
                 close_side = self.config.close_order_side
+
+                # 记录状态信息用于调试
+                self.logger.log(
+                    f"[CLOSE] Need to close {self.order_filled_amount} from cancelled/filled order {order_id}",
+                    "DEBUG"
+                )
+
                 if self.config.boost_mode:
-                    close_order_result = await self.exchange_client.place_close_order(
-                        self.config.contract_id,
-                        self.order_filled_amount,
-                        filled_price,
-                        close_side
-                    )
+                    # boost 模式：使用 IOC/MARKET 立即平仓
+                    if self.config.use_ioc_optimization:
+                        close_order_result = await self._smart_close_with_ioc(
+                            self.order_filled_amount,
+                            close_side
+                        )
+                    else:
+                        close_order_result = await self.exchange_client.place_market_order(
+                            self.config.contract_id,
+                            self.order_filled_amount,
+                            close_side
+                        )
                 else:
+                    # 非 boost 模式：使用 LIMIT 订单
                     if close_side == 'sell':
                         close_price = filled_price * (1 + self.config.take_profit/100)
                     else:

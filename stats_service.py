@@ -109,8 +109,14 @@ def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> 
 
                 quantity = parse_decimal(row.get("Quantity") or row.get("quantity"))
                 price = parse_decimal(row.get("Price") or row.get("price"))
-                fee = parse_decimal(row.get("Fee") or row.get("fee")) or Decimal("0")
-                fee_rate = parse_decimal(row.get("FeeRate") or row.get("fee_rate")) or Decimal("0")
+
+                # Parse fee/fee_rate - distinguish between empty and 0
+                fee_str = row.get("Fee") or row.get("fee")
+                fee = parse_decimal(fee_str) if fee_str else None
+
+                fee_rate_str = row.get("FeeRate") or row.get("fee_rate")
+                fee_rate = parse_decimal(fee_rate_str) if fee_rate_str else None
+
                 timestamp = parse_timestamp(row.get("Timestamp"), tz)
                 if quantity is None or price is None or timestamp is None:
                     continue
@@ -118,7 +124,7 @@ def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> 
                 quote_amount = quantity * price
                 elapsed = now_ts - timestamp
 
-                # Volume statistics
+                # Volume statistics (always count)
                 total += quote_amount
                 if timestamp.date() == now_ts.date():
                     today_total += quote_amount
@@ -128,30 +134,33 @@ def _aggregate_single_file(path: str, tz: pytz.BaseTzInfo, now_ts: datetime) -> 
                 if 3600 < elapsed.total_seconds() <= 7200:
                     last_hour_total += quote_amount
 
-                # Fee statistics
-                total_fee += fee
-                if timestamp.date() == now_ts.date():
-                    today_fee += fee
+                # Fee statistics (only count if Fee field exists)
+                if fee is not None:
+                    total_fee += fee
+                    if timestamp.date() == now_ts.date():
+                        today_fee += fee
 
-                if 0 <= elapsed.total_seconds() <= 3600:
-                    current_hour_fee += fee
-                if 3600 < elapsed.total_seconds() <= 7200:
-                    last_hour_fee += fee
+                    if 0 <= elapsed.total_seconds() <= 3600:
+                        current_hour_fee += fee
+                    if 3600 < elapsed.total_seconds() <= 7200:
+                        last_hour_fee += fee
 
-                # Fee rate samples (for averaging and verification)
-                if fee_rate > 0:
+                # Fee rate samples (only count if FeeRate field exists)
+                if fee_rate is not None and fee_rate > 0:
                     fee_rate_samples.append(fee_rate)
                     if timestamp.date() == now_ts.date():
                         today_fee_rate_samples.append(fee_rate)
 
-                # Liquidity role statistics (Maker/Taker)
+                # Liquidity role statistics (only count if LiquidityRole field exists)
                 liquidity_role = (row.get("LiquidityRole") or row.get("liquidity_role") or "").strip()
                 if liquidity_role:
-                    if liquidity_role == "Maker":
+                    # Use case-insensitive comparison to support both 'Maker'/'Taker' and 'MAKER'/'TAKER'
+                    liquidity_role_upper = liquidity_role.upper()
+                    if liquidity_role_upper == "MAKER":
                         total_maker_count += 1
                         if timestamp.date() == now_ts.date():
                             today_maker_count += 1
-                    elif liquidity_role == "Taker":
+                    elif liquidity_role_upper == "TAKER":
                         total_taker_count += 1
                         if timestamp.date() == now_ts.date():
                             today_taker_count += 1
