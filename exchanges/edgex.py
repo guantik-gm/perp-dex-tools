@@ -571,3 +571,94 @@ class EdgeXClient(BaseExchangeClient):
         self.config.tick_size = Decimal(current_contract.get('tickSize'))
 
         return self.config.contract_id, self.config.tick_size
+
+    @query_retry(default_return=Decimal('0'))
+    async def get_funding_rate(self, contract_id: str) -> Decimal:
+        """获取资金费率 - 对冲模式专用，自动转换为1小时费率"""
+        try:
+            url = f"{self.base_url}/api/v1/public/funding/getLatestFundingRate?contractId={contract_id}"
+            
+            import requests
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code != 200:
+                self.logger.log(f"⚠️ HTTP请求失败: {response.status_code}", "WARNING")
+                return Decimal('0')
+                
+            response_data = response.json()
+
+            if response_data.get('code') == 'SUCCESS' and response_data.get('data'):
+                data_list = response_data['data']
+                if len(data_list) > 0:
+                    funding_data = data_list[0]
+                    funding_rate = Decimal(str(funding_data.get('fundingRate', '0')))
+                    
+                    funding_interval = Decimal(funding_data.get('fundingRateIntervalMin', 240)) / 60
+                    funding_rate_1h = funding_rate / funding_interval
+
+                    self.logger.log(f"📊 EdgeX资金费率: {funding_rate:.6f} ({funding_interval}h) → {funding_rate_1h:.6f} (1h)", "INFO")
+                    return funding_rate_1h
+                else:
+                    self.logger.log(f"⚠️ 无资金费率数据: {contract_id}", "WARNING")
+                    return Decimal('0')
+            else:
+                self.logger.log(f"⚠️ 获取资金费率失败: {response_data.get('msg', 'Unknown error')}", "WARNING")
+                return Decimal('0')
+
+        except Exception as e:
+            self.logger.log(f"❌ 资金费率获取异常: {e}", "ERROR")
+            return Decimal('0')
+
+    @query_retry(default_return=(Decimal('0'), Decimal('0')))
+    async def get_mid_price(self, contract_id: str) -> Tuple[Decimal, Decimal]:
+        """获取中间价格 - 对冲模式专用"""
+        try:
+            best_bid, best_ask = await self.fetch_bbo_prices(contract_id)
+            if best_bid > 0 and best_ask > 0:
+                mid_price = (best_bid + best_ask) / Decimal('2')
+                spread = best_ask - best_bid
+                return mid_price, spread
+            return Decimal('0'), Decimal('0')
+        except Exception as e:
+            self.logger.log(f"❌ 获取中间价格失败: {e}", "ERROR")
+            return Decimal('0'), Decimal('0')
+
+    @query_retry(default_return={})
+    async def get_account_balances(self) -> Dict[str, Decimal]:
+        """获取账户余额 - 对冲模式专用"""
+        try:
+            account_data = await self.client.get_account_asset()
+            if not account_data or 'data' not in account_data:
+                return {}
+
+            balances = {}
+            data = account_data['data']
+            
+            # 根据真实API结构，余额信息在 collateralAssetModelList 中
+            collateral_assets = data.get('collateralAssetModelList', [])
+            for asset in collateral_assets:
+                # coinId "1000" 对应 USDC
+                coin_id = asset.get('coinId', '')
+                if coin_id == '1000':  # USDC
+                    available_amount = Decimal(str(asset.get('availableAmount', '0')))
+                    total_equity = Decimal(str(asset.get('totalEquity', '0')))
+                    
+                    balances['USDC'] = {
+                        'available': available_amount,
+                        'total': total_equity
+                    }
+                    break
+            
+            # 如果没有找到USDC，设置默认值
+            if 'USDC' not in balances:
+                balances['USDC'] = {
+                    'available': Decimal('0'),
+                    'total': Decimal('0')
+                }
+
+            self.logger.log(f"📊 账户余额获取成功: USDC可用={balances['USDC']['available']:.6f}, 总权益={balances['USDC']['total']:.6f}", "INFO")
+            return balances
+
+        except Exception as e:
+            self.logger.log(f"❌ 获取账户余额失败: {e}", "ERROR")
+            return {}
