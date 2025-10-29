@@ -103,6 +103,46 @@ class HedgeMonitor:
         except Exception as notify_error:
             self.logger.error(f"Failed to send error notification: {notify_error}")
 
+    async def handle_stuck_order(self, order_id: str, order_price: Decimal, side: str,
+                               best_bid: Decimal, best_ask: Decimal, elapsed_time: float,
+                               consecutive_timeouts: int) -> None:
+        """
+        处理卡单情况并发送一次 Telegram 告警
+        
+        Args:
+            order_id: 当前订单ID
+            order_price: 订单价格
+            side: 订单方向
+            best_bid: 最佳买价
+            best_ask: 最佳卖价
+            elapsed_time: 当前订单已经等待的时间
+            consecutive_timeouts: 连续超时次数
+        """
+        # 计算卡单总时长（每次超时10秒 * 连续次数）
+        total_stuck_time = consecutive_timeouts * 10
+        
+        self.logger.error(f"🚨 检测到卡单！连续超时 {consecutive_timeouts} 次，卡单时长约 {total_stuck_time} 秒")
+        self.logger.error(f"🚨 订单 {order_id} 可能卡住了，WebSocket 未返回最新状态")
+        
+        # 发送一次 Telegram 告警
+        if self.telegram_bot:
+            try:
+                side_display = "买入" if side == 'buy' else "卖出"
+                
+                # 构建告警消息
+                alert_msg = f"🚨 [{self.primary_exchange_name}_{self.ticker}] 卡单告警\n" \
+                           f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                           f"🕐 {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                           f"📋 订单ID: {order_id}\n" \
+                           f"🏷️ {side_display} ${order_price}\n" \
+                           f"📊 连续超时: {consecutive_timeouts}次 (约{total_stuck_time}秒)\n" \
+                           f"⚠️ WebSocket 未返回订单状态更新"
+                
+                self.telegram_bot.send_text(alert_msg)
+                self.logger.info("✅ 卡单告警已发送")
+            except Exception as e:
+                self.logger.error(f"❌ 发送卡单告警失败: {e}")
+
     async def send_position_open_notification(self, strategy_context: 'StrategyExecutionContext') -> None:
         """发送开仓通知，使用策略提供的执行上下文"""
         if not self.telegram_bot:
@@ -155,8 +195,9 @@ class HedgeMonitor:
         except Exception as e:
             self.logger.error(f"Failed to send position open notification: {e}")
 
-    async def send_position_close_notification(self, strategy_context: 'StrategyExecutionContext') -> None:
-        """发送平仓通知，使用策略提供的执行上下文"""
+    async def send_position_close_notification(self, strategy_context: 'StrategyExecutionContext', 
+                                             primary_client=None, lighter_proxy=None) -> None:
+        """发送平仓通知，使用策略提供的执行上下文和准确的PnL数据"""
         if not self.telegram_bot:
             return
             
@@ -191,7 +232,7 @@ class HedgeMonitor:
                 lighter_price = 0
                 close_spread = 0
             
-            # 计算PnL - 从策略上下文获取开仓价格
+            # 获取开仓时的价格和本金信息
             open_strategy_context = self.position_open_data.get('strategy_context')
             if open_strategy_context and open_strategy_context.price_data:
                 open_side = open_strategy_context.side
@@ -205,17 +246,42 @@ class HedgeMonitor:
                 open_lighter_price = Decimal('0')
                 open_spread = 0
             
-            # 根据开仓方向计算PnL
-            if open_side == 'buy':
-                # 开仓时买入primary，卖出lighter；平仓时卖出primary，买入lighter
-                primary_pnl = (primary_price - open_primary_price) * self.order_quantity
-                lighter_pnl = (open_lighter_price - lighter_price) * self.order_quantity
-            else:
-                # 开仓时卖出primary，买入lighter；平仓时买入primary，卖出lighter
-                primary_pnl = (open_primary_price - primary_price) * self.order_quantity
-                lighter_pnl = (lighter_price - open_lighter_price) * self.order_quantity
+            # 计算双边开仓本金总和(默认20x杠杆)
+            primary_capital = abs(open_primary_price * self.order_quantity / 20)
+            lighter_capital = abs(open_lighter_price * self.order_quantity / 20)
+            total_capital = primary_capital + lighter_capital
             
+            # 使用准确的PnL方法获取双边收益
+            primary_pnl = Decimal('0')
+            lighter_pnl = Decimal('0')
+            
+            try:
+                if primary_client:
+                    primary_pnl = await primary_client.get_ticker_position_pnl()
+                    self.logger.info(f"✅ Primary({self.primary_exchange_name}) PnL: {primary_pnl}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ 无法获取Primary PnL: {e}")
+                # 备用计算方案
+                if open_side == 'buy':
+                    primary_pnl = (primary_price - open_primary_price) * self.order_quantity
+                else:
+                    primary_pnl = (open_primary_price - primary_price) * self.order_quantity
+            
+            try:
+                if lighter_proxy:
+                    lighter_pnl = await lighter_proxy.get_ticker_position_pnl()
+                    self.logger.info(f"✅ Lighter PnL: {lighter_pnl}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ 无法获取Lighter PnL: {e}")
+                # 备用计算方案
+                if open_side == 'buy':
+                    lighter_pnl = (open_lighter_price - lighter_price) * self.order_quantity
+                else:
+                    lighter_pnl = (lighter_price - open_lighter_price) * self.order_quantity
+            
+            # 计算总收益和收益率
             total_pnl = primary_pnl + lighter_pnl
+            total_return_rate = (total_pnl / total_capital * 100) if total_capital > 0 else Decimal('0')
             
             # 确定对冲方向
             lighter_side = 'sell' if side == 'buy' else 'buy'
@@ -228,7 +294,12 @@ class HedgeMonitor:
                       f"🏭 Primary({self.primary_exchange_name}): {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
                       f"💡 Lighter: {lighter_side.upper()} {self.order_quantity} @ ${lighter_price}\n" \
                       f"💰 开仓价差: ${open_spread} → 平仓价差: ${close_spread}\n" \
-                      f"📊 交易盈亏: ${total_pnl:.4f}\n" \
+                      f"📊 双边收益明细:\n" \
+                      f"   🏭 Primary PnL: ${primary_pnl:.4f}\n" \
+                      f"   💡 Lighter PnL: ${lighter_pnl:.4f}\n" \
+                      f"   💯 总收益: ${total_pnl:.4f}\n" \
+                      f"💎 投入本金: ${total_capital:.2f}\n" \
+                      f"📈 总收益率: {total_return_rate:.4f}%\n" \
                       f"⏱️ 持仓时长: {hold_time_minutes:.1f}分钟\n" \
                       f"🔄 下次开仓: 预计{next_open_minutes:.1f}分钟后"
             

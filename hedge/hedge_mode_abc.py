@@ -70,6 +70,11 @@ class HedgeBotAbc(ABC):
         # Order execution tracking
         self.order_execution_complete = False
         
+        # 卡单检测相关
+        self.consecutive_timeout_count = 0  # 连续超时计数器
+        self.stuck_order_threshold = 30     # 卡单检测阈值（30次）
+        self.stuck_alert_sent = False       # 是否已发送过卡单告警
+        
         # 开平仓策略接口
         self.hedge_position_strategy = None
 
@@ -340,6 +345,7 @@ class HedgeBotAbc(ABC):
             raise Exception(f"{self.primary_exchange_name()} client not initialized")
 
         self.primary_order_status = None
+        # 注意：不在此处重置计数器，保持跨调用的累积检测
         self.logger.info(f"[OPEN] [{self.primary_exchange_name()}] [{side}] Placing {self.primary_exchange_name()} POST-ONLY order")
         order_id, order_price = await self.place_bbo_order(side, quantity)
 
@@ -358,6 +364,12 @@ class HedgeBotAbc(ABC):
             
             if self.primary_order_status == 'CANCELED':
                 self.logger.info(f"🔄 Order was canceled, placing new order")
+                # 重置卡单计数器和告警标志，因为成功收到了状态更新
+                if self.consecutive_timeout_count > 0:
+                    self.logger.info(f"✅ WebSocket 状态恢复，重置卡单计数器 (之前: {self.consecutive_timeout_count})")
+                    self.consecutive_timeout_count = 0
+                    self.stuck_alert_sent = False
+                
                 self.primary_order_status = 'NEW'
                 order_id, order_price = await self.place_bbo_order(side, quantity)
                 start_time = time.time()
@@ -389,7 +401,18 @@ class HedgeBotAbc(ABC):
                 # Check if 10 seconds have passed
                 if elapsed_time > 10:
                     if should_cancel:
-                        self.logger.info(f"⏰ 10s timeout reached, canceling order due to unfavorable price")
+                        # 增加连续超时计数器
+                        self.consecutive_timeout_count += 1
+                        self.logger.info(f"⏰ 10s timeout reached, canceling order due to unfavorable price (连续超时次数: {self.consecutive_timeout_count}/{self.stuck_order_threshold})")
+                        
+                        # 检查是否达到卡单阈值且未发送过告警
+                        if self.consecutive_timeout_count >= self.stuck_order_threshold and not self.stuck_alert_sent:
+                            await self.monitor.handle_stuck_order(
+                                order_id, order_price, side, best_bid, best_ask, elapsed_time,
+                                self.consecutive_timeout_count
+                            )
+                            self.stuck_alert_sent = True
+                        
                         try:
                             # Cancel the order using Primary client
                             cancel_result = await self.primary_client.cancel_order(order_id)
@@ -404,6 +427,11 @@ class HedgeBotAbc(ABC):
                         start_time = time.time()  # Reset timer
             elif self.primary_order_status == 'FILLED':
                 self.logger.info(f"✅ Order {order_id} filled successfully after {elapsed_time:.1f}s")
+                # 重置卡单计数器和告警标志，因为订单已成功填充
+                if self.consecutive_timeout_count > 0:
+                    self.logger.info(f"✅ 订单成功填充，重置卡单计数器 (之前: {self.consecutive_timeout_count})")
+                    self.consecutive_timeout_count = 0
+                    self.stuck_alert_sent = False
                 break
             else:
                 if self.primary_order_status is not None:
@@ -558,7 +586,11 @@ class HedgeBotAbc(ABC):
                 # 获取策略执行上下文
                 if self.hedge_position_strategy:
                     strategy_context = self.hedge_position_strategy.get_execution_context()
-                    await self.monitor.send_position_close_notification(strategy_context)
+                    await self.monitor.send_position_close_notification(
+                        strategy_context, 
+                        primary_client=self.primary_client, 
+                        lighter_proxy=self.lighter
+                    )
                 else:
                     self.logger.warning("没有策略实例，无法获取执行上下文")
                 

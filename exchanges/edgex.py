@@ -568,6 +568,14 @@ class EdgeXClient(BaseExchangeClient):
             raise ValueError("No position found for liquidation price calculation")
         return Decimal(position["liquidatePrice"])
     
+    async def get_ticker_position_pnl(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        # unrealizePnl, termRealizePnl
+        return Decimal(position["totalRealizePnl"])
+    
     async def get_contract_attributes(self) -> Tuple[str, Decimal]:
         """Get contract ID for a ticker."""
         ticker = self.config.ticker
@@ -645,7 +653,6 @@ class EdgeXClient(BaseExchangeClient):
 
     @query_retry(default_return=(Decimal('0'), Decimal('0')))
     async def get_mid_price(self, contract_id: str) -> Tuple[Decimal, Decimal]:
-        """获取中间价格 - 对冲模式专用"""
         try:
             best_bid, best_ask = await self.fetch_bbo_prices(contract_id)
             if best_bid > 0 and best_ask > 0:
@@ -659,7 +666,6 @@ class EdgeXClient(BaseExchangeClient):
 
     @query_retry(default_return={})
     async def get_account_balances(self) -> Dict[str, Decimal]:
-        """获取账户余额 - 对冲模式专用"""
         try:
             account_data = await self.client.get_account_asset()
             if not account_data or 'data' not in account_data:

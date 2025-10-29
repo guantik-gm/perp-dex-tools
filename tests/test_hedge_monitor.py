@@ -242,7 +242,7 @@ class TestHedgeMonitor:
                 'strategy_context': sample_open_context
             }
             
-            await hedge_monitor_with_telegram.send_position_close_notification(sample_close_context)
+            await hedge_monitor_with_telegram.send_position_close_notification(sample_close_context, None, None)
             
             # 恢复原始ticker
             hedge_monitor_with_telegram.ticker = original_ticker
@@ -259,7 +259,7 @@ class TestHedgeMonitor:
     @pytest.mark.asyncio
     async def test_send_position_close_notification_without_open_data(self, hedge_monitor_with_telegram, sample_close_context, mock_logger):
         """测试没有开仓数据时的平仓通知"""
-        await hedge_monitor_with_telegram.send_position_close_notification(sample_close_context)
+        await hedge_monitor_with_telegram.send_position_close_notification(sample_close_context, None, None)
         
         # 应该记录警告，但不发送消息
         mock_logger.warning.assert_called_with("No position open data found for close notification")
@@ -551,7 +551,7 @@ class TestHedgeMonitorIntegration:
                     trigger=DecisionTrigger.TIME_CLOSE,
                     next_open_minutes=15.0
                 )
-                await monitor.send_position_close_notification(close_context)
+                await monitor.send_position_close_notification(close_context, None, None)
                 assert mock_bot.send_text.call_count == 3
                 
                 # 4. 系统停止
@@ -576,7 +576,7 @@ class TestHedgeMonitorIntegration:
         
         # 无效的策略上下文处理
         await monitor.send_position_open_notification(None)
-        await monitor.send_position_close_notification(None)
+        await monitor.send_position_close_notification(None, None, None)
 
 
 if __name__ == "__main__":
