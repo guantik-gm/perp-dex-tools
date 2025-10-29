@@ -207,6 +207,7 @@ class TimingController:
         self.last_close_time = None
         self.next_open_time = None
         self.next_close_time = None
+        self.current_close_wait_minutes = None  # 当前平仓等待时间
         self.is_first_trade = True
         self.logger = None
     
@@ -226,6 +227,7 @@ class TimingController:
         """调度下次平仓时间"""
         wait_minutes = random.uniform(min_minutes, max_minutes)
         self.next_close_time = time.time() + (wait_minutes * 60)
+        self.current_close_wait_minutes = int(wait_minutes)  # 保存实际等待时间
         
         if self.logger:
             self.logger.info(f"⏰ 预计平仓时间: {wait_minutes:.1f}分钟后")
@@ -309,11 +311,14 @@ class SmartHedgeStrategy(HedgeStrategy):
                 'profit_threshold': additional_metrics.get('profit_threshold')
             })
         
+        # 使用TimingController中实际计算的等待时间
+        estimated_minutes = self.timing_controller.current_close_wait_minutes or self.max_close_wait_minutes
+        
         self.last_execution_context = StrategyExecutionContext.create_open_context(
             reason=reason,
             side=side,
             price_data=price_data,
-            estimated_close_minutes=self.max_close_wait_minutes,
+            estimated_close_minutes=estimated_minutes,
             trigger=trigger,
             **kwargs
         )
@@ -329,11 +334,14 @@ class SmartHedgeStrategy(HedgeStrategy):
                 'profit_threshold': additional_metrics.get('profit_threshold')
             })
         
+        # 使用TimingController中实际计算的等待时间
+        estimated_minutes = self.timing_controller.current_close_wait_minutes or self.max_close_wait_minutes
+        
         self.last_execution_context = StrategyExecutionContext.create_close_context(
             reason=reason,
             side=side,
             price_data=price_data,
-            estimated_close_minutes=self.max_close_wait_minutes,
+            estimated_close_minutes=estimated_minutes,
             trigger=trigger,
             next_open_minutes=next_open_minutes or 15.0,  # 默认15分钟后开仓
             **kwargs

@@ -52,8 +52,8 @@ class TestHedgeMonitor:
     def hedge_monitor_with_telegram(self, mock_logger):
         """创建带真实 Telegram Bot 的 HedgeMonitor 实例（单元测试模式）"""
         # 使用真实的Telegram Bot凭据
-        real_token = '8348451874:AAEEc4sqVuaJniOebVYnzY55ShW0hcCStSY'
-        real_chat_id = '5801746488'
+        real_token = os.environ.get('TELEGRAM_BOT_TOKEN', 'TEST_BOT_TOKEN')
+        real_chat_id = os.environ.get('TELEGRAM_CHAT_ID', 'TEST_CHAT_ID')
         
         with patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": real_token, "TELEGRAM_CHAT_ID": real_chat_id}):
             monitor = HedgeMonitor(
@@ -128,8 +128,8 @@ class TestHedgeMonitor:
         """测试带真实 Telegram Bot 的初始化"""
         # 验证Telegram Bot被正确初始化
         assert hedge_monitor_with_telegram.telegram_bot is not None
-        assert hedge_monitor_with_telegram.telegram_bot.token == '8348451874:AAEEc4sqVuaJniOebVYnzY55ShW0hcCStSY'
-        assert hedge_monitor_with_telegram.telegram_bot.chat_id == '5801746488'
+        assert hedge_monitor_with_telegram.telegram_bot.token == os.environ.get('TELEGRAM_BOT_TOKEN')
+        assert hedge_monitor_with_telegram.telegram_bot.chat_id == os.environ.get('TELEGRAM_CHAT_ID')
 
     @pytest.mark.asyncio
     async def test_send_startup_notification_without_telegram(self, hedge_monitor):
