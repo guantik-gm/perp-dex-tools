@@ -61,12 +61,13 @@ class HedgeMonitor:
             return
             
         try:
-            startup_msg = f"📡 系统启动\n" \
-                        f"对冲交易系统已启动\n" \
-                        f"币种: {self.ticker}\n" \
-                        f"交易所: {self.primary_exchange_name} + Lighter\n" \
-                        f"交易数量: {self.order_quantity}\n" \
-                        f"计划执行: {iterations}轮"
+            startup_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                        f"📡 系统启动通知\n" \
+                        f"🕐 启动时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                        f"💰 交易数量: {self.order_quantity}\n" \
+                        f"🏭 交易所组合: {self.primary_exchange_name} + Lighter\n" \
+                        f"📋 计划执行: {iterations}轮"
             self.telegram_bot.send_text(startup_msg)
         except Exception as e:
             self.logger.error(f"Failed to send startup notification: {e}")
@@ -77,10 +78,11 @@ class HedgeMonitor:
             return
             
         try:
-            shutdown_msg = f"📡 系统停止\n" \
-                         f"对冲交易系统已停止\n" \
-                         f"币种: {self.ticker}\n" \
-                         f"持仓状态: Primary={primary_position}, Lighter={lighter_position}"
+            shutdown_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                         f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                         f"🛑 系统停止通知\n" \
+                         f"🕐 停止时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                         f"📊 持仓状态: Primary={primary_position}, Lighter={lighter_position}"
             self.telegram_bot.send_text(shutdown_msg)
         except Exception as e:
             self.logger.error(f"Failed to send shutdown notification: {e}")
@@ -91,7 +93,12 @@ class HedgeMonitor:
             return
             
         try:
-            error_msg = f"❌ 系统异常\n币种: {self.ticker}\n错误: {str(error)}\n上下文: {context}"
+            error_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                     f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                     f"❌ 系统异常报告\n" \
+                     f"🕐 异常时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                     f"🔴 错误信息: {str(error)}\n" \
+                     f"📝 上下文: {context}"
             self.telegram_bot.send_text(error_msg)
         except Exception as notify_error:
             self.logger.error(f"Failed to send error notification: {notify_error}")
@@ -126,13 +133,15 @@ class HedgeMonitor:
             # 确定对冲方向
             lighter_side = 'sell' if side == 'buy' else 'buy'
             
-            open_msg = f"🚀 开仓通知\n" \
-                     f"币种: {self.ticker}\n" \
-                     f"策略: {reason}\n" \
-                     f"Primary({self.primary_exchange_name}): {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
-                     f"Lighter: {lighter_side.upper()} {self.order_quantity} @ ${lighter_price}\n" \
-                     f"价差: ${spread}\n" \
-                     f"预计平仓时间: {estimated_close_minutes}分钟"
+            open_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                     f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                     f"🚀 开仓执行通知\n" \
+                     f"🕐 开仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                     f"📈 策略原因: {reason}\n" \
+                     f"🏭 Primary({self.primary_exchange_name}): {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
+                     f"💡 Lighter: {lighter_side.upper()} {self.order_quantity} @ ${lighter_price}\n" \
+                     f"💰 当前价差: ${spread}\n" \
+                     f"⏰ 预计平仓: {estimated_close_minutes}分钟"
             
             self.telegram_bot.send_text(open_msg)
             
@@ -211,16 +220,17 @@ class HedgeMonitor:
             # 确定对冲方向
             lighter_side = 'sell' if side == 'buy' else 'buy'
             
-            close_msg = f"🎯 平仓通知\n" \
-                      f"币种: {self.ticker}\n" \
-                      f"平仓原因: {close_reason}\n" \
-                      f"Primary({self.primary_exchange_name}): {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
-                      f"Lighter: {lighter_side.upper()} {self.order_quantity} @ ${lighter_price}\n" \
-                      f"开仓价差: ${open_spread}\n" \
-                      f"平仓价差: ${close_spread}\n" \
-                      f"PnL: ${total_pnl:.4f}\n" \
-                      f"持仓时长: {hold_time_minutes:.1f}分钟\n" \
-                      f"下次开仓: 预计{next_open_minutes:.1f}分钟后"
+            close_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                      f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                      f"🎯 平仓执行通知\n" \
+                      f"🕐 平仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                      f"📈 平仓原因: {close_reason}\n" \
+                      f"🏭 Primary({self.primary_exchange_name}): {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
+                      f"💡 Lighter: {lighter_side.upper()} {self.order_quantity} @ ${lighter_price}\n" \
+                      f"💰 开仓价差: ${open_spread} → 平仓价差: ${close_spread}\n" \
+                      f"📊 交易盈亏: ${total_pnl:.4f}\n" \
+                      f"⏱️ 持仓时长: {hold_time_minutes:.1f}分钟\n" \
+                      f"🔄 下次开仓: 预计{next_open_minutes:.1f}分钟后"
             
             self.telegram_bot.send_text(close_msg)
             
@@ -296,14 +306,18 @@ class HedgeMonitor:
                     'error_timeout': '错误超时'
                 }.get(strategy_context.trigger.value, strategy_context.trigger.value)
                 
-                status_msg = f"📊 持仓状态监控\n" \
-                           f"币种: {self.ticker}\n" \
-                           f"策略触发: {trigger_text}\n" \
-                           f"Primary({self.primary_exchange_name}): 持仓 {primary_position}, 开仓价 ${open_primary_price}, 市价 ${primary_market_price}\n" \
-                           f"Lighter: 持仓 {lighter_position}, 开仓价 ${open_lighter_price}, 市价 ${lighter_market_price}\n" \
-                           f"当前价差: ${current_spread}\n" \
-                           f"当前PnL: ${total_pnl:.4f}\n" \
-                           f"预计剩余时间: {estimated_remaining_minutes:.0f}分钟"
+                status_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                           f"━━━━━━━━━━━━━━━━━━━━━━\n" \
+                           f"📊 持仓状态报告\n" \
+                           f"🕐 报告时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
+                           f"📈 策略触发: {trigger_text}\n" \
+                           f"🏭 Primary({self.primary_exchange_name}): 持仓 {primary_position}\n" \
+                           f"   开仓价: ${open_primary_price} | 市价: ${primary_market_price}\n" \
+                           f"💡 Lighter: 持仓 {lighter_position}\n" \
+                           f"   开仓价: ${open_lighter_price} | 市价: ${lighter_market_price}\n" \
+                           f"💰 当前价差: ${current_spread}\n" \
+                           f"📊 实时盈亏: ${total_pnl:.4f}\n" \
+                           f"⏰ 剩余时间: {estimated_remaining_minutes:.0f}分钟"
                 
                 self.telegram_bot.send_text(status_msg)
             
