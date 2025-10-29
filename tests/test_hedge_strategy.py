@@ -19,7 +19,9 @@ from hedge.hedge_strategy import (
     HedgeStrategy, 
     SpreadSampler, 
     TimingController, 
-    SmartHedgeStrategy
+    SmartHedgeStrategy,
+    StrategyExecutionContext,
+    DecisionTrigger
 )
 
 
@@ -875,6 +877,139 @@ class TestSmartHedgeStrategy:
         assert strategy.risk_threshold == 0.15
         assert isinstance(strategy.spread_sampler, SpreadSampler)
         assert isinstance(strategy.timing_controller, TimingController)
+
+
+class TestDecisionTrigger:
+    """测试决策触发器枚举"""
+
+    def test_all_trigger_values(self):
+        """测试所有触发器枚举值"""
+        expected_triggers = {
+            'SPREAD_THRESHOLD': 'spread_threshold',
+            'TIME_DRIVEN': 'time_driven',
+            'TIMEOUT': 'timeout',
+            'RISK_CONTROL': 'risk_control',
+            'SPREAD_CLOSE': 'spread_close',
+            'TIME_CLOSE': 'time_close',
+            'ERROR_TIMEOUT': 'error_timeout'
+        }
+        
+        for trigger_name, trigger_value in expected_triggers.items():
+            trigger = getattr(DecisionTrigger, trigger_name)
+            assert trigger.value == trigger_value
+            assert isinstance(trigger, DecisionTrigger)
+
+    def test_trigger_uniqueness(self):
+        """测试所有触发器值的唯一性"""
+        all_values = [trigger.value for trigger in DecisionTrigger]
+        assert len(all_values) == len(set(all_values))
+
+    def test_trigger_equality(self):
+        """测试触发器相等性"""
+        trigger1 = DecisionTrigger.SPREAD_THRESHOLD
+        trigger2 = DecisionTrigger.SPREAD_THRESHOLD
+        trigger3 = DecisionTrigger.TIME_DRIVEN
+        
+        assert trigger1 == trigger2
+        assert trigger1 != trigger3
+
+
+class TestStrategyExecutionContext:
+    """测试策略执行上下文数据类"""
+
+    @pytest.fixture
+    def sample_price_data(self):
+        """创建示例价格数据"""
+        return {
+            'primary_ask': Decimal('50000'),
+            'primary_bid': Decimal('49995'),
+            'lighter_ask': Decimal('50005'),
+            'lighter_bid': Decimal('49990'),
+            'spread': Decimal('10'),
+            'primary_mid': Decimal('49997.5'),
+            'lighter_mid': Decimal('49997.5')
+        }
+
+    def test_basic_initialization(self, sample_price_data):
+        """测试基本初始化"""
+        context = StrategyExecutionContext(
+            reason="测试原因",
+            decision_type="open",
+            side="buy",
+            timestamp=time.time(),
+            price_data=sample_price_data,
+            estimated_close_minutes=120,
+            trigger=DecisionTrigger.SPREAD_THRESHOLD
+        )
+        
+        assert context.reason == "测试原因"
+        assert context.decision_type == "open"
+        assert context.side == "buy"
+        assert context.price_data == sample_price_data
+        assert context.estimated_close_minutes == 120
+        assert context.trigger == DecisionTrigger.SPREAD_THRESHOLD
+
+    def test_create_open_context(self, sample_price_data):
+        """测试创建开仓上下文"""
+        context = StrategyExecutionContext.create_open_context(
+            reason="价差阈值满足",
+            side="buy",
+            price_data=sample_price_data,
+            estimated_close_minutes=90,
+            trigger=DecisionTrigger.SPREAD_THRESHOLD,
+            current_spread=10.5,
+            average_spread=8.2
+        )
+        
+        assert context.decision_type == "open"
+        assert context.reason == "价差阈值满足"
+        assert context.side == "buy"
+        assert context.current_spread == 10.5
+        assert context.average_spread == 8.2
+        assert abs(context.timestamp - time.time()) < 1.0
+
+    def test_create_close_context(self, sample_price_data):
+        """测试创建平仓上下文"""
+        context = StrategyExecutionContext.create_close_context(
+            reason="时间平仓",
+            side="sell",
+            price_data=sample_price_data,
+            estimated_close_minutes=60,
+            trigger=DecisionTrigger.TIME_CLOSE,
+            next_open_minutes=15.0
+        )
+        
+        assert context.decision_type == "close"
+        assert context.reason == "时间平仓"
+        assert context.side == "sell"
+        assert context.next_open_minutes == 15.0
+        assert context.trigger == DecisionTrigger.TIME_CLOSE
+
+    def test_context_equality(self, sample_price_data):
+        """测试上下文相等性"""
+        timestamp = time.time()
+        
+        context1 = StrategyExecutionContext(
+            reason="相等性测试",
+            decision_type="open",
+            side="buy",
+            timestamp=timestamp,
+            price_data=sample_price_data,
+            estimated_close_minutes=60,
+            trigger=DecisionTrigger.SPREAD_THRESHOLD
+        )
+        
+        context2 = StrategyExecutionContext(
+            reason="相等性测试",
+            decision_type="open",
+            side="buy",
+            timestamp=timestamp,
+            price_data=sample_price_data,
+            estimated_close_minutes=60,
+            trigger=DecisionTrigger.SPREAD_THRESHOLD
+        )
+        
+        assert context1 == context2
 
 
 if __name__ == "__main__":
