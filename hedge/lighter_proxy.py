@@ -1,3 +1,4 @@
+import lighter
 import websockets
 import asyncio
 import json
@@ -10,11 +11,12 @@ import traceback
 from decimal import Decimal
 from typing import Tuple
 
-from lighter.signer_client import SignerClient
+from lighter import SignerClient, ApiClient, Configuration
 import sys
 import os
 
-from hedge.hedge_mode_abc import log_trade_to_csv
+from exchanges.base import query_retry
+from helpers.logger import log_trade_to_csv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class LighterProxy:
@@ -29,10 +31,15 @@ class LighterProxy:
         
         # Callback function to notify parent of position changes
         self.position_callback = position_callback
-       
+        
+        # todo: 是否需要close 
+        self.api_client = None
         self.lighter_client = None 
         self.lighter_client = self._initialize_lighter_client()
         self.lighter_market_index, self.base_amount_multiplier, self.price_multiplier = self._get_lighter_market_config()
+        self.logger.info(f"✅ Lighter market config - Market Index: {self.lighter_market_index}, "
+                         f"Base Amount Multiplier: {self.base_amount_multiplier}, "
+                         f"Price Multiplier: {self.price_multiplier}")
         self.stop_flag = False
         
         # Lighter order book state
@@ -112,6 +119,7 @@ class LighterProxy:
             raise
 
     async def setup_ws_task(self):
+        self.api_client = ApiClient(Configuration(host=self.lighter_base_url))
         self.lighter_ws_task = asyncio.create_task(self.handle_lighter_ws())
         self.logger.info("✅ Lighter WebSocket task started")
         await self.wait_for_lighter_order_book_ready()
@@ -548,3 +556,48 @@ class LighterProxy:
             self.logger.error(f"❌ Error modifying Lighter order: {e}")
             import traceback
             self.logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+
+    async def fetch_bbo_prices(self) -> Tuple[Decimal, Decimal]:
+        """获取最优买卖价 - 适配SmartHedgeStrategy"""
+        try:
+            best_bid, best_ask = self.get_lighter_best_levels()
+            
+            if best_bid is None or best_ask is None:
+                raise Exception("无法获取Lighter最优价格 - 订单簿数据缺失")
+            
+            return best_bid[0], best_ask[0]  # 返回价格部分，忽略数量
+        except Exception as e:
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.error(f"获取Lighter最优价格失败: {e}")
+            raise
+
+    @query_retry(reraise=True)
+    async def get_ticker_position(self):
+        """Get positions using official SDK."""
+        # 接口文档：https://apidocs.lighter.xyz/reference/account-1
+        # Use shared API client
+        account_api = lighter.AccountApi(self.api_client)
+
+        # Get account info
+        account_data = await account_api.account(by="index", value=str(self.account_index))
+
+        if not account_data or not account_data.accounts:
+            self.logger.log("Failed to get positions", "ERROR")
+            raise ValueError("Failed to get positions")
+        position = None
+        positions = account_data.accounts[0].positions
+        for p in positions:
+            if p.market_id == self.lighter_market_index:
+                position = p
+                break
+        if position is None:
+            self.logger.log(f"No position found for market {self.lighter_market_index}", "INFO")
+        return position
+    
+    async def get_ticker_position_liquidation_price(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        return Decimal(position.liquidation_price)
+        

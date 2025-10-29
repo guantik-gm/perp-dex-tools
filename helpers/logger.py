@@ -9,6 +9,25 @@ from datetime import datetime
 import pytz
 from decimal import Decimal
 
+def log_trade_to_csv(exchange: str, ticker: str, side: str, price: str, quantity: str):
+    """Log trade details to CSV file."""
+    timestamp = datetime.now(pytz.UTC).isoformat()
+    filename = f"logs/{exchange}_{ticker}_hedge_mode_trades.csv"
+    """Initialize CSV file with headers if it doesn't exist."""
+    if not os.path.exists(filename):
+        with open(filename, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['exchange', 'timestamp', 'side', 'price', 'quantity'])
+
+    with open(filename, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([
+            exchange,
+            timestamp,
+            side,
+            price,
+            quantity
+        ])
 
 class TradingLogger:
     """Enhanced logging with structured output and error handling."""
