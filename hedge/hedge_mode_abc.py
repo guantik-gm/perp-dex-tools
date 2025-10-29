@@ -214,7 +214,7 @@ class HedgeBotAbc(ABC):
                         self.primary_position += filled_size
                     else:
                         self.primary_position -= filled_size
-                    self.logger.info(f"[{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {filled_size} @ {price}")
+                    self.logger.info(f"[WebSocket] [{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {filled_size} @ {price}")
                     self.primary_order_status = status
 
                     # Log Primary trade to CSV
@@ -225,8 +225,6 @@ class HedgeBotAbc(ABC):
                         price=str(price),
                         quantity=str(filled_size)
                     )
-                    self.logger.info(
-                        f"📊 Trade logged to CSV: {self.primary_exchange_name()} {side} {str(filled_size)} @ {price}")
 
                     self.handle_primary_order_update({
                         'order_id': order_id,
@@ -239,13 +237,13 @@ class HedgeBotAbc(ABC):
                     })
                 elif self.primary_order_status != 'FILLED':
                     if status == 'OPEN':
-                        self.logger.info(f"[{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {size} @ {price}")
+                        self.logger.info(f"[WebSocket] [{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {size} @ {price}")
                     else:
-                        self.logger.info(f"[{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {filled_size} @ {price}")
+                        self.logger.info(f"[WebSocket] [{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {filled_size} @ {price}")
                     self.primary_order_status = status
 
             except Exception as e:
-                self.logger.error(f"Error handling {self.primary_exchange_name()} order update: {e}")
+                self.logger.error(f"[WebSocket] Error handling {self.primary_exchange_name()} order update: {e}")
 
         try:
             # Setup order update handler
@@ -349,11 +347,16 @@ class HedgeBotAbc(ABC):
         last_log_time = 0
         log_interval = 5  # Log status every 5 seconds
         
-        self.logger.info(f"⏳ Started waiting for order {order_id} fill - Order price: {order_price}, Side: {side}")
-        
         while not self.stop_flag:
             current_time = time.time()
             elapsed_time = current_time - start_time
+            
+            if elapsed_time > 10:
+                # 超时后可能ws没有收到订单更新，需要通过接口重新获取一下订单信息以确保订单状态是最新的
+                self.logger.info(f"⏰ 10s timeout reached, rechecking the order latest status for order {order_id}, current status: {self.primary_order_status}")
+                order_info = await self.primary_client.get_order_info(order_id)
+                self.primary_order_status = order_info.status
+                self.logger.info(f"🔄 Rechecked order status: {self.primary_order_status}")
             
             # Log status every 5 seconds
             if current_time - last_log_time >= log_interval:
@@ -399,6 +402,7 @@ class HedgeBotAbc(ABC):
                             cancel_result = await self.primary_client.cancel_order(order_id)
                             if not cancel_result.success:
                                 self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
+                            # 这里如果已经取消的订单api返回也是success将会陷入循环
                         except Exception as e:
                             self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {e}")
                     else:

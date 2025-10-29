@@ -251,7 +251,7 @@ class LighterProxy:
 
             client_order_index = order_data["client_order_id"]
 
-            self.logger.info(f"[{client_order_index}] [{order_type}] [Lighter] [FILLED]: "
+            self.logger.info(f"[WebSocket] [{client_order_index}] [{order_type}] [Lighter] [FILLED]: "
                              f"{order_data['filled_base_amount']} @ {order_data['avg_filled_price']}")
 
             # Log Lighter trade to CSV
