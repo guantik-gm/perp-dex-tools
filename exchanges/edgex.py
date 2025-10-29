@@ -449,7 +449,7 @@ class EdgeXClient(BaseExchangeClient):
             order_info = await self.get_order_info(order_id)
             if order_info and order_info.status in ['CANCELED', 'FILLED']:
                 self.logger.log(f"Order {order_id} already {order_info.status}, no need to cancel", "INFO")
-                return OrderResult(success=True, error_message=f'Order already {order_info.status}')
+                return OrderResult(success=False, status=order_info.status, error_message=f'Order already {order_info.status}')
             # Create cancel parameters using official SDK
             cancel_params = CancelOrderParams(order_id=order_id)
 
