@@ -265,7 +265,7 @@ class SmartHedgeStrategy(HedgeStrategy):
                  profit_threshold=0.05,
                  open_wait_range=(5, 20),
                  close_wait_range=(30, 240),
-                 sleep_time=30,
+                 sleep_time=600,
                  risk_threshold=0.20,
                  max_open_wait_minutes=30,
                  max_close_wait_minutes=60):
@@ -387,7 +387,10 @@ class SmartHedgeStrategy(HedgeStrategy):
                     else:
                         self.open_side = 'sell'
 
-                    # 记录执行上下文
+                    # 先调度平仓时间，获取实际的等待时间
+                    self.timing_controller.schedule_next_close(*self.close_wait_range)
+                    
+                    # 记录执行上下文，使用实际的平仓等待时间
                     self._set_open_execution_context(
                         reason=reason,
                         price_data=current_sample,
@@ -398,8 +401,6 @@ class SmartHedgeStrategy(HedgeStrategy):
                             'average_spread': self.spread_sampler.average_spread
                         }
                     )
-
-                    self.timing_controller.schedule_next_close(*self.close_wait_range)
                     self._reset_open_decision_time()
                     return  # 条件满足，退出等待
                 
@@ -414,7 +415,10 @@ class SmartHedgeStrategy(HedgeStrategy):
                     else:
                         self.open_side = 'sell'
                     
-                    # 记录执行上下文
+                    # 先调度平仓时间，获取实际的等待时间
+                    self.timing_controller.schedule_next_close(*self.close_wait_range)
+                    
+                    # 记录执行上下文，使用实际的平仓等待时间
                     self._set_open_execution_context(
                         reason=reason,
                         price_data=current_sample,
@@ -425,8 +429,6 @@ class SmartHedgeStrategy(HedgeStrategy):
                             'average_spread': self.spread_sampler.average_spread
                         }
                     )
-                    
-                    self.timing_controller.schedule_next_close(*self.close_wait_range)
                     self._reset_open_decision_time()
                     return  # 条件满足，退出等待
                 
@@ -442,7 +444,10 @@ class SmartHedgeStrategy(HedgeStrategy):
                     else:
                         self.open_side = 'sell'
                     
-                    # 记录执行上下文
+                    # 先调度平仓时间，获取实际的等待时间
+                    self.timing_controller.schedule_next_close(*self.close_wait_range)
+                    
+                    # 记录执行上下文，使用实际的平仓等待时间
                     self._set_open_execution_context(
                         reason=reason,
                         price_data=current_sample,
@@ -453,8 +458,6 @@ class SmartHedgeStrategy(HedgeStrategy):
                             'average_spread': self.spread_sampler.average_spread
                         }
                     )
-                    
-                    self.timing_controller.schedule_next_close(*self.close_wait_range)
                     self._reset_open_decision_time()
                     return  # 超时保护，退出等待
                 
@@ -475,6 +478,10 @@ class SmartHedgeStrategy(HedgeStrategy):
                     
                     # 设置默认方向和上下文
                     self.open_side = 'buy'  # 默认开多
+                    
+                    # 异常情况下，使用默认的平仓等待时间
+                    self.timing_controller.current_close_wait_minutes = self.max_close_wait_minutes
+                    
                     self._set_open_execution_context(
                         reason=reason,
                         price_data={},  # 异常情况下没有完整价格数据
