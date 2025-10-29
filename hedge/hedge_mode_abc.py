@@ -89,7 +89,7 @@ class HedgeBotAbc(ABC):
     def _initialize_logger(self):
         # Setup logger
         self.logger = logging.getLogger(f"hedge_bot_{self.ticker}")
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG)  # Set to DEBUG to show all our detailed logs
 
         # Clear any existing handlers to avoid duplicates
         self.logger.handlers.clear()
@@ -106,17 +106,44 @@ class HedgeBotAbc(ABC):
         # Disable root logger propagation to prevent external logs
         logging.getLogger().setLevel(logging.CRITICAL)
 
+        # Create timezone-aware formatter
+        import pytz
+        import os
+        
+        class TimeZoneFormatter(logging.Formatter):
+            def __init__(self, fmt=None, datefmt=None, tz=None):
+                super().__init__(fmt=fmt, datefmt=datefmt)
+                self.tz = tz
+
+            def formatTime(self, record, datefmt=None):
+                dt = datetime.fromtimestamp(record.created, tz=self.tz)
+                if datefmt:
+                    return dt.strftime(datefmt)
+                return dt.isoformat()
+
+        # Get timezone from environment or default to Asia/Shanghai
+        timezone = pytz.timezone(os.getenv('TIMEZONE', 'Asia/Shanghai'))
+
         # Create file handler
         file_handler = logging.FileHandler(self.log_filename)
-        file_handler.setLevel(logging.INFO)
+        file_handler.setLevel(logging.DEBUG)  # File captures all debug info
 
         # Create console handler
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.INFO)  # Console shows important info only
 
-        # Create different formatters for file and console
-        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_formatter = logging.Formatter('%(levelname)s:%(name)s:%(message)s')
+        # Create professional formatters with timestamp
+        file_formatter = TimeZoneFormatter(
+            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            tz=timezone
+        )
+        
+        console_formatter = TimeZoneFormatter(
+            '%(asctime)s.%(msecs)03d - %(levelname)s - %(name)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+            tz=timezone
+        )
 
         file_handler.setFormatter(file_formatter)
         console_handler.setFormatter(console_formatter)
@@ -127,9 +154,6 @@ class HedgeBotAbc(ABC):
 
         # Prevent propagation to root logger to avoid duplicate messages and external logs
         self.logger.propagate = False
-
-        # Ensure our logger only shows our messages
-        self.logger.setLevel(logging.INFO)
 
     def _initialize_primary_client(self):
         for key, value in self.primary_client_vars().items():
@@ -287,6 +311,7 @@ class HedgeBotAbc(ABC):
         return (price / self.primary_tick_size).quantize(Decimal('1')) * self.primary_tick_size
 
     async def place_bbo_order(self, side: str, quantity: Decimal):
+        self.logger.info(f"📈 Fetching market prices for {side} order placement...")
         # Place the order using Primary client
         order_result = await self.primary_client.place_open_order(
             contract_id=self.primary_contract_id,
@@ -295,8 +320,10 @@ class HedgeBotAbc(ABC):
         )
 
         if order_result.success:
+            self.logger.info(f"📋 Order placed successfully - ID: {order_result.order_id}, Price: {order_result.price}")
             return order_result.order_id, order_result.price
         else:
+            self.logger.error(f"❌ Failed to place {side} order: {order_result.error_message}")
             raise Exception(f"Failed to place order: {order_result.error_message}")
 
     async def place_primary_post_only_order(self, side: str, quantity: Decimal):
@@ -309,25 +336,54 @@ class HedgeBotAbc(ABC):
         order_id, order_price = await self.place_bbo_order(side, quantity)
 
         start_time = time.time()
+        last_log_time = 0
+        log_interval = 5  # Log status every 5 seconds
+        
+        self.logger.info(f"⏳ Started waiting for order {order_id} fill - Order price: {order_price}, Side: {side}")
+        
         while not self.stop_flag:
+            current_time = time.time()
+            elapsed_time = current_time - start_time
+            
+            # Log status every 5 seconds
+            if current_time - last_log_time >= log_interval:
+                self.logger.info(f"⏳ Waiting for order fill - Status: {self.primary_order_status}, Elapsed: {elapsed_time:.1f}s")
+                last_log_time = current_time
+            
             if self.primary_order_status == 'CANCELED':
+                self.logger.info(f"🔄 Order was canceled, placing new order")
                 self.primary_order_status = 'NEW'
                 order_id, order_price = await self.place_bbo_order(side, quantity)
                 start_time = time.time()
+                self.logger.info(f"📝 New order placed - ID: {order_id}, Price: {order_price}")
                 await asyncio.sleep(0.5)
             elif self.primary_order_status in ['NEW', 'OPEN', 'PENDING', 'CANCELING', 'PARTIALLY_FILLED']:
                 await asyncio.sleep(0.5)
+                
                 # Check if we need to cancel and replace the order
                 should_cancel = False
                 best_bid, best_ask = await self.fetch_primary_bbo_prices()
+                
+                # Log price comparison details
                 if side == 'buy':
+                    self.logger.debug(f"📊 Price check - Buy order: {order_price}, Best bid: {best_bid}, Best ask: {best_ask}")
                     if order_price < best_bid:
                         should_cancel = True
+                        self.logger.debug(f"💡 Buy order price {order_price} < best bid {best_bid}, should cancel")
+                    else:
+                        self.logger.debug(f"✅ Buy order price {order_price} >= best bid {best_bid}, keeping order")
                 else:
+                    self.logger.debug(f"📊 Price check - Sell order: {order_price}, Best bid: {best_bid}, Best ask: {best_ask}")
                     if order_price > best_ask:
                         should_cancel = True
-                if time.time() - start_time > 10:
+                        self.logger.debug(f"💡 Sell order price {order_price} > best ask {best_ask}, should cancel")
+                    else:
+                        self.logger.debug(f"✅ Sell order price {order_price} <= best ask {best_ask}, keeping order")
+                
+                # Check if 10 seconds have passed
+                if elapsed_time > 10:
                     if should_cancel:
+                        self.logger.info(f"⏰ 10s timeout reached, canceling order due to unfavorable price")
                         try:
                             # Cancel the order using Primary client
                             cancel_result = await self.primary_client.cancel_order(order_id)
@@ -336,15 +392,17 @@ class HedgeBotAbc(ABC):
                         except Exception as e:
                             self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {e}")
                     else:
-                        self.logger.info(f"Order {order_id} is at best bid/ask, waiting for fill")
-                        start_time = time.time()
+                        self.logger.info(f"⏰ 10s timeout reached, but order {order_id} is at favorable price (bid: {best_bid}, ask: {best_ask}), continuing to wait")
+                        start_time = time.time()  # Reset timer
             elif self.primary_order_status == 'FILLED':
+                self.logger.info(f"✅ Order {order_id} filled successfully after {elapsed_time:.1f}s")
                 break
             else:
                 if self.primary_order_status is not None:
                     self.logger.error(f"❌ Unknown {self.primary_exchange_name()} order status: {self.primary_order_status}")
                     break
                 else:
+                    self.logger.debug(f"⏳ No order status update yet, continuing to wait...")
                     await asyncio.sleep(0.5)
 
     def handle_primary_order_update(self, order_data):
