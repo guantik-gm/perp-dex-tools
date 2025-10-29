@@ -7,6 +7,7 @@ import sys
 import os
 
 from hedge.hedge_mode_abc import Config, HedgeBotAbc
+from hedge.hedge_strategy import SmartHedgeStrategy
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from exchanges.edgex import EdgeXClient
@@ -15,6 +16,10 @@ from exchanges.edgex import EdgeXClient
 class HedgeBot(HedgeBotAbc):
     """Trading bot that places post-only orders on EdgeX and hedges with market orders on Lighter."""
 
+    def __init__(self, ticker: str, order_quantity: Decimal, fill_timeout: int = 5, iterations: int = 20):
+        super().__init__(ticker, order_quantity, fill_timeout, iterations)
+        self.hedge_position_strategy = SmartHedgeStrategy()
+    
     def primary_exchange_name(self):
         return "edgex"
     

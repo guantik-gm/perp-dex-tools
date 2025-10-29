@@ -17,6 +17,7 @@ import sys
 import os
 
 from hedge.lighter_proxy import LighterProxy
+from helpers.logger import log_trade_to_csv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -26,28 +27,6 @@ class Config:
     def __init__(self, config_dict):
         for key, value in config_dict.items():
             setattr(self, key, value)
-
-
-def log_trade_to_csv(exchange: str, ticker: str, side: str, price: str, quantity: str):
-    """Log trade details to CSV file."""
-    timestamp = datetime.now(pytz.UTC).isoformat()
-    filename = f"logs/{exchange}_{ticker}_hedge_mode_trades.csv"
-    """Initialize CSV file with headers if it doesn't exist."""
-    if not os.path.exists(filename):
-        with open(filename, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['exchange', 'timestamp', 'side', 'price', 'quantity'])
-
-    with open(filename, 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([
-            exchange,
-            timestamp,
-            side,
-            price,
-            quantity
-        ])
-
 
 class HedgeBotAbc(ABC):
     """Trading bot that places post-only orders on primary and hedges with market orders on Lighter."""
@@ -73,8 +52,6 @@ class HedgeBotAbc(ABC):
         self._initialize_primary_client()
 
         self.lighter = LighterProxy(self.ticker, self.logger, position_callback=self._update_lighter_position)
-        self.logger.info(
-            f"Contract info loaded - {self.primary_exchange_name()}: {self.primary_contract_id}, "f"Lighter: {self.lighter.lighter_market_index}")
 
         self.waiting_for_lighter_fill = False
         # State management
@@ -85,8 +62,7 @@ class HedgeBotAbc(ABC):
         self.order_execution_complete = False
         
         # 开平仓策略接口
-        self.hedge_position_open_strategy = None
-        self.hedge_position_close_strategy = None
+        self.hedge_position_strategy = None
 
     @abstractmethod
     def primary_exchange_name(self):
@@ -455,27 +431,34 @@ class HedgeBotAbc(ABC):
                 self.logger.error(f"❌ Position diff is too large: {self.primary_position + self.lighter_position}")
                 break
 
-            if self.hedge_position_open_strategy:
-                self.hedge_position_open_strategy.execute(self)
+            open_side = 'buy'
+            if self.hedge_position_strategy:
+                await self.hedge_position_strategy.wait_open(self)
+                open_side = self.hedge_position_strategy.open_side
+
             # Step 1: 开仓
-            if not await self._execute_hedge_position('buy', self.order_quantity):
+            if not await self._execute_hedge_position(open_side, self.order_quantity):
                 break
 
             if self.stop_flag:
                 break
 
-            if self.hedge_position_close_strategy:
-                self.hedge_position_close_strategy.execute(self)
+            
+            close_side = 'sell' 
+            if self.hedge_position_strategy:
+                await self.hedge_position_strategy.wait_close(self)
+                close_side = 'sell' if self.hedge_position_strategy.open_side == 'buy' else 'buy'
+
             # Step 2: 第一次平仓
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
-            if not await self._execute_hedge_position('sell', self.order_quantity):
+            if not await self._execute_hedge_position(close_side, self.order_quantity):
                 break
 
             # Step 3: 剩余平仓
             self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
-            close_side, close_quantity = self._determine_close_side_and_quantity()
-            if close_side:
-                if not await self._execute_hedge_position(close_side, close_quantity):
+            final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
+            if final_close_side:
+                if not await self._execute_hedge_position(final_close_side, final_close_quantity):
                     break
 
     async def run(self):
@@ -484,13 +467,16 @@ class HedgeBotAbc(ABC):
 
         try:
             await asyncio.gather(
-                await self._init_primary_contract_info(),
-                await self._setup_primary_websocket(),
-                await self.lighter.setup_ws_task()
+                self._init_primary_contract_info(),
+                self._setup_primary_websocket(),
+                self.lighter.setup_ws_task()
             )
             await self.trading_loop()
         except KeyboardInterrupt:
             self.logger.info("\n🛑 Received interrupt signal...")
+        except Exception as e:
+            self.logger.error(f"❌ Error running hedge bot: {e}")
+            self.logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         finally:
             self.logger.info("🔄 Cleaning up...")
             self.shutdown()

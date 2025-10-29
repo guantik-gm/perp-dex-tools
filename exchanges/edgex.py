@@ -534,6 +534,30 @@ class EdgeXClient(BaseExchangeClient):
                 position_amt = 0
         return position_amt
 
+    @query_retry(default_return=0)
+    async def get_ticker_position(self) -> Decimal:
+        """Get account positions using official SDK."""
+        # 接口文档地址: https://edgex-1.gitbook.io/edgeX-documentation/api/private-api/account-api#get-account-asset
+        position = None
+        positions_data = await self.client.get_account_positions()
+        if not positions_data or 'data' not in positions_data:
+            self.logger.log("No positions or failed to get positions", "WARNING")
+        else:
+            positions = positions_data.get('data', {}).get('positionAssetList', [])
+            if positions:
+                for p in positions:
+                    if isinstance(p, dict) and p.get('contractId') == self.config.contract_id:
+                        position = p
+                        break
+        return position
+
+    async def get_ticker_position_liquidation_price(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        return Decimal(position["liquidatePrice"])
+    
     async def get_contract_attributes(self) -> Tuple[str, Decimal]:
         """Get contract ID for a ticker."""
         ticker = self.config.ticker
