@@ -419,7 +419,9 @@ class HedgeBotAbc(ABC):
                             self.logger.info(f"Order {order_id} canceled: {cancel_result}")
                             if not cancel_result.success:
                                 self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
-                            # 这里如果已经取消的订单api返回也是success将会陷入循环
+                                # 取消失败时如果订单状态已经是CANCELED或FILLED，则更新状态，理论上不会再出现卡单状态
+                                if cancel_result.status in ['CANCELED', 'FILLED']:
+                                    self.primary_order_status = cancel_result.status
                         except Exception as e:
                             self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {e}")
                     else:
