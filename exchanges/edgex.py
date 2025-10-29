@@ -288,6 +288,8 @@ class EdgeXClient(BaseExchangeClient):
                     order_price = best_bid + self.config.tick_size
                     side = OrderSide.SELL
 
+                self.logger.log(f"Placing open order: side={side.value}, size={quantity}, price={self.round_to_tick(order_price)}", "INFO")
+
                 # Place the order using official SDK (post-only to ensure maker order)
                 order_result = await self.client.create_limit_order(
                     contract_id=contract_id,
@@ -297,8 +299,8 @@ class EdgeXClient(BaseExchangeClient):
                     post_only=True
                 )
                 
-                self.logger.info(f"Placed order attempt {retry_count + 1}: {order_result}")
-
+                self.logger.log(f"Order placement result: {order_result}", "INFO")
+                
                 if not order_result or 'data' not in order_result:
                     return OrderResult(success=False, error_message='Failed to place order')
 
@@ -310,7 +312,7 @@ class EdgeXClient(BaseExchangeClient):
                 # Check order status after a short delay to see if it was rejected
                 await asyncio.sleep(0.05)
                 order_info = await self.get_order_info(order_id)
-                self.logger.info(f"Order info after placement: {order_info}")
+                self.logger.log(f"Order info after placement: {order_info}", "INFO")
 
                 if order_info:
                     if order_info.status == 'CANCELED':
