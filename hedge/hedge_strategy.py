@@ -2,7 +2,78 @@ from abc import ABC, abstractmethod
 import time
 import random
 import asyncio
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+from decimal import Decimal
+from enum import Enum
 
+
+# 策略决策触发原因枚举
+class DecisionTrigger(Enum):
+    """策略决策触发原因"""
+    SPREAD_THRESHOLD = "spread_threshold"      # 价差阈值满足
+    TIME_DRIVEN = "time_driven"               # 时间驱动决策
+    TIMEOUT = "timeout"                       # 超时触发
+    RISK_CONTROL = "risk_control"             # 风险控制触发
+    SPREAD_CLOSE = "spread_close"             # 价差平仓
+    TIME_CLOSE = "time_close"                 # 时间平仓
+    ERROR_TIMEOUT = "error_timeout"           # 错误超时
+    MANUAL = "manual"                         # 手动触发
+    PROFIT_TARGET = "profit_target"           # 盈利目标达成
+
+@dataclass
+class StrategyExecutionContext:
+    """策略执行上下文数据类 - 简化版本"""
+    reason: str                                 # 具体决策原因描述
+    decision_type: str                          # 'open' 或 'close'
+    side: str                                  # 开仓/平仓方向 ('buy'/'sell')
+    timestamp: float                           # 决策时间戳
+    price_data: Dict[str, Any]                 # 决策时的完整价格数据
+    estimated_close_minutes: int               # 预计平仓时间（分钟）
+    trigger: DecisionTrigger                   # 决策触发原因（枚举）
+    next_open_minutes: Optional[float] = None  # 下次开仓预计时间（分钟），仅平仓时有值
+    
+    # 关键度量指标
+    current_spread: Optional[float] = None     # 当前价差
+    average_spread: Optional[float] = None     # 平均价差
+    profit_threshold: Optional[float] = None   # 盈利阈值
+    
+    @classmethod
+    def create_open_context(cls, reason: str, side: str, price_data: Dict[str, Any], 
+                           estimated_close_minutes: int, trigger: DecisionTrigger = DecisionTrigger.SPREAD_THRESHOLD,
+                           **kwargs) -> 'StrategyExecutionContext':
+        """创建开仓执行上下文"""
+        return cls(
+            reason=reason,
+            decision_type='open',
+            side=side,
+            timestamp=time.time(),
+            price_data=price_data,
+            estimated_close_minutes=estimated_close_minutes,
+            trigger=trigger,
+            current_spread=kwargs.get('current_spread'),
+            average_spread=kwargs.get('average_spread'),
+            profit_threshold=kwargs.get('profit_threshold')
+        )
+    
+    @classmethod  
+    def create_close_context(cls, reason: str, side: str, price_data: Dict[str, Any],
+                           estimated_close_minutes: int, trigger: DecisionTrigger,
+                           next_open_minutes: Optional[float] = None, **kwargs) -> 'StrategyExecutionContext':
+        """创建平仓执行上下文"""
+        return cls(
+            reason=reason,
+            decision_type='close', 
+            side=side,
+            timestamp=time.time(),
+            price_data=price_data,
+            estimated_close_minutes=estimated_close_minutes,
+            trigger=trigger,
+            next_open_minutes=next_open_minutes,
+            current_spread=kwargs.get('current_spread'),
+            average_spread=kwargs.get('average_spread'),
+            profit_threshold=kwargs.get('profit_threshold')
+        )
 
 class HedgeStrategy(ABC):
     """Abstract base class for hedge strategies."""
@@ -214,11 +285,59 @@ class SmartHedgeStrategy(HedgeStrategy):
         # 状态记录
         self.open_decision_start_time = None    # 开仓决策开始时间
         self.close_decision_start_time = None   # 平仓决策开始时间
+        
+        # 执行上下文管理 - 使用数据类管理策略决策信息
+        self.last_execution_context: Optional[StrategyExecutionContext] = None
     
     def _setup_logger(self, hedge_bot):
         """设置logger引用"""
         self.spread_sampler.logger = hedge_bot.logger
         self.timing_controller.logger = hedge_bot.logger
+    
+    def get_execution_context(self) -> Optional['StrategyExecutionContext']:
+        """获取最后的策略执行上下文"""
+        return self.last_execution_context
+    
+    def _set_open_execution_context(self, reason: str, price_data: Dict[str, Any], side: str, trigger: DecisionTrigger = DecisionTrigger.SPREAD_THRESHOLD, additional_metrics: Dict[str, Any] = None):
+        """设置开仓策略执行上下文"""
+        # 从additional_metrics中提取关键指标，如果没有则使用默认值
+        kwargs = {}
+        if additional_metrics:
+            kwargs.update({
+                'current_spread': additional_metrics.get('current_spread'),
+                'average_spread': additional_metrics.get('average_spread'),
+                'profit_threshold': additional_metrics.get('profit_threshold')
+            })
+        
+        self.last_execution_context = StrategyExecutionContext.create_open_context(
+            reason=reason,
+            side=side,
+            price_data=price_data,
+            estimated_close_minutes=self.max_close_wait_minutes,
+            trigger=trigger,
+            **kwargs
+        )
+    
+    def _set_close_execution_context(self, reason: str, price_data: Dict[str, Any], side: str, trigger: DecisionTrigger, next_open_minutes: float = None, additional_metrics: Dict[str, Any] = None):
+        """设置平仓策略执行上下文"""
+        # 从additional_metrics中提取关键指标，如果没有则使用默认值
+        kwargs = {}
+        if additional_metrics:
+            kwargs.update({
+                'current_spread': additional_metrics.get('current_spread'),
+                'average_spread': additional_metrics.get('average_spread'),
+                'profit_threshold': additional_metrics.get('profit_threshold')
+            })
+        
+        self.last_execution_context = StrategyExecutionContext.create_close_context(
+            reason=reason,
+            side=side,
+            price_data=price_data,
+            estimated_close_minutes=self.max_close_wait_minutes,
+            trigger=trigger,
+            next_open_minutes=next_open_minutes or 15.0,  # 默认15分钟后开仓
+            **kwargs
+        )
     
     async def wait_open(self, hedge_bot):
         """智能开仓决策：等待价差+时间双维度条件满足"""
@@ -251,7 +370,8 @@ class SmartHedgeStrategy(HedgeStrategy):
                 spread_favorable = self.spread_sampler.should_open_by_spread(current_spread)
                 
                 if spread_favorable:
-                    logger.info(f"✅ 价差维度满足：当前{current_spread:.6f} > 平均{self.spread_sampler.average_spread:.6f}")
+                    reason = f"✅ 价差维度满足：当前{current_spread:.6f} > 平均{self.spread_sampler.average_spread:.6f}"
+                    logger.info(reason)
                     
                     # 确定开仓方向
                     if current_sample['primary_mid'] < current_sample['lighter_mid']:
@@ -259,13 +379,26 @@ class SmartHedgeStrategy(HedgeStrategy):
                     else:
                         self.open_side = 'sell'
 
+                    # 记录执行上下文
+                    self._set_open_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side=self.open_side,
+                        trigger=DecisionTrigger.SPREAD_THRESHOLD,
+                        additional_metrics={
+                            'current_spread': current_spread,
+                            'average_spread': self.spread_sampler.average_spread
+                        }
+                    )
+
                     self.timing_controller.schedule_next_close(*self.close_wait_range)
                     self._reset_open_decision_time()
                     return  # 条件满足，退出等待
                 
                 # 维度2：时间判断
                 elif self.timing_controller.can_open_by_time():
-                    logger.info("⏰ 时间维度满足：到达预定开仓时间")
+                    reason = "⏰ 时间维度满足：到达预定开仓时间"
+                    logger.info(reason)
                     
                     # 时间驱动的开仓也需要确定方向
                     if current_sample['primary_mid'] < current_sample['lighter_mid']:
@@ -273,19 +406,45 @@ class SmartHedgeStrategy(HedgeStrategy):
                     else:
                         self.open_side = 'sell'
                     
+                    # 记录执行上下文
+                    self._set_open_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side=self.open_side,
+                        trigger=DecisionTrigger.TIME_DRIVEN,
+                        additional_metrics={
+                            'current_spread': current_spread,
+                            'average_spread': self.spread_sampler.average_spread
+                        }
+                    )
+                    
                     self.timing_controller.schedule_next_close(*self.close_wait_range)
                     self._reset_open_decision_time()
                     return  # 条件满足，退出等待
                 
                 # 维度3：超时保护 - 策略内部处理最大等待时间
                 elif self._is_open_timeout():
-                    logger.warning(f"⏰ 超时保护触发：已等待{(time.time() - self.open_decision_start_time)/60:.1f}分钟，强制开仓")
+                    wait_minutes = (time.time() - self.open_decision_start_time) / 60
+                    reason = f"⏰ 超时保护触发：已等待{wait_minutes:.1f}分钟，强制开仓"
+                    logger.warning(reason)
                     
                     # 超时情况下也需要确定方向
                     if current_sample['primary_mid'] < current_sample['lighter_mid']:
                         self.open_side = 'buy'
                     else:
                         self.open_side = 'sell'
+                    
+                    # 记录执行上下文
+                    self._set_open_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side=self.open_side,
+                        trigger=DecisionTrigger.TIMEOUT,
+                        additional_metrics={
+                            'current_spread': current_spread,
+                            'average_spread': self.spread_sampler.average_spread
+                        }
+                    )
                     
                     self.timing_controller.schedule_next_close(*self.close_wait_range)
                     self._reset_open_decision_time()
@@ -302,7 +461,19 @@ class SmartHedgeStrategy(HedgeStrategy):
                 logger.error(f"❌ 开仓策略执行失败: {e}")
                 # 出错时也触发超时保护
                 if self._is_open_timeout():
-                    logger.warning("⚠️ 策略执行失败且超时，强制开仓")
+                    wait_minutes = (time.time() - self.open_decision_start_time) / 60
+                    reason = f"⚠️ 策略执行失败且超时：已等待{wait_minutes:.1f}分钟，强制开仓"
+                    logger.warning(reason)
+                    
+                    # 设置默认方向和上下文
+                    self.open_side = 'buy'  # 默认开多
+                    self._set_open_execution_context(
+                        reason=reason,
+                        price_data={},  # 异常情况下没有完整价格数据
+                        side=self.open_side,
+                        trigger=DecisionTrigger.ERROR_TIMEOUT
+                    )
+                    
                     self._reset_open_decision_time()
                     return  # 超时保护，退出等待
                 # 出错时等待后重试
@@ -347,7 +518,21 @@ class SmartHedgeStrategy(HedgeStrategy):
                 )
                 
                 if risk_control_triggered:
-                    logger.warning("🚨 风险控制触发：价格接近清算线，立即双边平仓")
+                    reason = "🚨 风险控制触发：价格接近清算线，立即双边平仓"
+                    logger.warning(reason)
+                    
+                    # 记录执行上下文
+                    self._set_close_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side='risk_control',  # 风险控制平仓
+                        trigger=DecisionTrigger.RISK_CONTROL,
+                        next_open_minutes=random.uniform(*self.open_wait_range),
+                        additional_metrics={
+                            'current_spread': current_spread
+                        }
+                    )
+                    
                     self.timing_controller.record_close()
                     self.timing_controller.schedule_next_open(*self.open_wait_range)
                     self._reset_close_decision_time()
@@ -359,7 +544,23 @@ class SmartHedgeStrategy(HedgeStrategy):
                 )
                 
                 if spread_should_close:
-                    logger.info(f"✅ 价差维度满足平仓：当前{current_spread:.6f} <= 平均{self.spread_sampler.average_spread:.6f}且满足盈利阈值")
+                    reason = f"✅ 价差维度满足平仓：当前{current_spread:.6f} <= 平均{self.spread_sampler.average_spread:.6f}且满足盈利阈值"
+                    logger.info(reason)
+                    
+                    # 记录执行上下文
+                    self._set_close_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side='spread_profit',  # 价差+盈利平仓
+                        trigger=DecisionTrigger.SPREAD_CLOSE,
+                        next_open_minutes=random.uniform(*self.open_wait_range),
+                        additional_metrics={
+                            'current_spread': current_spread,
+                            'average_spread': self.spread_sampler.average_spread,
+                            'profit_threshold': self.profit_threshold
+                        }
+                    )
+                    
                     self.timing_controller.record_close()
                     self.timing_controller.schedule_next_open(*self.open_wait_range)
                     self._reset_close_decision_time()
@@ -367,7 +568,22 @@ class SmartHedgeStrategy(HedgeStrategy):
                 
                 # 维度2：时间判断
                 elif self.timing_controller.should_close_by_time():
-                    logger.info("⏰ 时间维度满足：到达预定平仓时间")
+                    reason = "⏰ 时间维度满足：到达预定平仓时间"
+                    logger.info(reason)
+                    
+                    # 记录执行上下文
+                    self._set_close_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side='time_driven',  # 时间驱动平仓
+                        trigger=DecisionTrigger.TIME_CLOSE,
+                        next_open_minutes=random.uniform(*self.open_wait_range),
+                        additional_metrics={
+                            'current_spread': current_spread,
+                            'average_spread': self.spread_sampler.average_spread
+                        }
+                    )
+                    
                     self.timing_controller.record_close()
                     self.timing_controller.schedule_next_open(*self.open_wait_range)
                     self._reset_close_decision_time()
@@ -375,7 +591,23 @@ class SmartHedgeStrategy(HedgeStrategy):
                 
                 # 维度3：超时保护 - 策略内部处理最大等待时间
                 elif self._is_close_timeout():
-                    logger.warning(f"⏰ 超时保护触发：已等待{(time.time() - self.close_decision_start_time)/60:.1f}分钟，强制平仓")
+                    wait_minutes = (time.time() - self.close_decision_start_time) / 60
+                    reason = f"⏰ 超时保护触发：已等待{wait_minutes:.1f}分钟，强制平仓"
+                    logger.warning(reason)
+                    
+                    # 记录执行上下文
+                    self._set_close_execution_context(
+                        reason=reason,
+                        price_data=current_sample,
+                        side='timeout',  # 超时平仓
+                        trigger=DecisionTrigger.TIMEOUT,
+                        next_open_minutes=random.uniform(*self.open_wait_range),
+                        additional_metrics={
+                            'current_spread': current_spread,
+                            'average_spread': self.spread_sampler.average_spread
+                        }
+                    )
+                    
                     self.timing_controller.record_close()
                     self.timing_controller.schedule_next_open(*self.open_wait_range)
                     self._reset_close_decision_time()
@@ -392,7 +624,19 @@ class SmartHedgeStrategy(HedgeStrategy):
                 logger.error(f"❌ 平仓策略执行失败: {e}")
                 # 出错时也触发超时保护
                 if self._is_close_timeout():
-                    logger.warning("⚠️ 策略执行失败且超时，强制平仓")
+                    wait_minutes = (time.time() - self.close_decision_start_time) / 60
+                    reason = f"⚠️ 策略执行失败且超时：已等待{wait_minutes:.1f}分钟，强制平仓"
+                    logger.warning(reason)
+                    
+                    # 记录执行上下文
+                    self._set_close_execution_context(
+                        reason=reason,
+                        price_data={},  # 异常情况下没有完整价格数据
+                        side='error_timeout',
+                        trigger=DecisionTrigger.ERROR_TIMEOUT,
+                        next_open_minutes=random.uniform(*self.open_wait_range)
+                    )
+                    
                     self._reset_close_decision_time()
                     return  # 超时保护，退出等待
                 # 出错时等待后重试
@@ -487,3 +731,4 @@ class SmartHedgeStrategy(HedgeStrategy):
     def _reset_close_decision_time(self):
         """重置平仓决策时间"""
         self.close_decision_start_time = None
+

@@ -296,6 +296,8 @@ class EdgeXClient(BaseExchangeClient):
                     side=side,
                     post_only=True
                 )
+                
+                self.logger.info(f"Placed order attempt {retry_count + 1}: {order_result}")
 
                 if not order_result or 'data' not in order_result:
                     return OrderResult(success=False, error_message='Failed to place order')
@@ -306,8 +308,9 @@ class EdgeXClient(BaseExchangeClient):
                     return OrderResult(success=False, error_message='No order ID in response')
 
                 # Check order status after a short delay to see if it was rejected
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.05)
                 order_info = await self.get_order_info(order_id)
+                self.logger.info(f"Order info after placement: {order_info}")
 
                 if order_info:
                     if order_info.status == 'CANCELED':

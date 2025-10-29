@@ -21,7 +21,7 @@ class HedgeBot(HedgeBotAbc):
         self.hedge_position_strategy = SmartHedgeStrategy()
     
     def primary_exchange_name(self):
-        return "edgex"
+        return "Edgex"
     
     def primary_client_vars(self):
         return {"account_id": os.getenv('EDGEX_ACCOUNT_ID'),
