@@ -178,7 +178,7 @@ class HedgeMonitor:
                      f"🚀 开仓执行通知\n" \
                      f"🕐 开仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
                      f"📈 策略原因: {reason}\n" \
-                     f"🏭 Primary({self.primary_exchange_name}): {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
+                     f"🏭 {self.primary_exchange_name}: {side.upper()} {self.order_quantity} @ ${primary_price}\n" \
                      f"💡 Lighter: {lighter_side.upper()} {self.order_quantity} @ ${lighter_price}\n" \
                      f"💰 当前价差: ${spread}\n" \
                      f"⏰ 预计平仓: {estimated_close_minutes}分钟"
@@ -258,7 +258,7 @@ class HedgeMonitor:
             try:
                 if primary_client:
                     primary_pnl = await primary_client.get_ticker_position_pnl()
-                    self.logger.info(f"✅ Primary({self.primary_exchange_name}) PnL: {primary_pnl}")
+                    self.logger.info(f"✅ {self.primary_exchange_name} PnL: {primary_pnl}")
             except Exception as e:
                 self.logger.warning(f"⚠️ 无法获取Primary PnL: {e}")
                 # 备用计算方案

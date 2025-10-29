@@ -276,7 +276,7 @@ class SmartHedgeStrategy(HedgeStrategy):
         
         self.risk_threshold = risk_threshold
         # 配置参数
-        self.profit_threshold = profit_threshold
+        self.profit_threshold = Decimal(profit_threshold)
         self.open_wait_range = open_wait_range
         self.close_wait_range = close_wait_range
         self.max_open_wait_minutes = max_open_wait_minutes    # 最大开仓等待时间
@@ -376,7 +376,7 @@ class SmartHedgeStrategy(HedgeStrategy):
                 spread_favorable = self.spread_sampler.should_open_by_spread(current_spread, self.profit_threshold)
                 
                 if spread_favorable:
-                    reason = f"✅ 价差维度满足：当前{current_spread:.6f} > 平均*{1 + self.profit_threshold}: {self.spread_sampler.average_spread * (1 + self.profit_threshold):.6f}"
+                    reason = f"✅ 价差维度满足：当前{current_spread:.6f} > {self.spread_sampler.average_spread * (1 + self.profit_threshold):.6f}"
                     logger.info(reason)
                     
                     # 确定开仓方向
@@ -557,7 +557,7 @@ class SmartHedgeStrategy(HedgeStrategy):
                 )
                 
                 if spread_should_close:
-                    reason = f"✅ 价差维度满足平仓：当前{current_spread:.6f} < 平均*{1 - self.profit_threshold}: {self.spread_sampler.average_spread * (1 - self.profit_threshold):.6f}"
+                    reason = f"✅ 价差维度满足平仓：当前{current_spread:.6f} < {self.spread_sampler.average_spread * (1 - self.profit_threshold):.6f}"
                     logger.info(reason)
                     
                     # 记录执行上下文
