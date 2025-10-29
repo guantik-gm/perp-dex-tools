@@ -45,7 +45,7 @@ class EdgeXClient(BaseExchangeClient):
         )
 
         # Initialize logger
-        self.logger = TradingLogger(exchange="edgex", ticker=self.config.ticker, log_to_console=True)
+        self.logger = TradingLogger(exchange="edgex", ticker=self.config.ticker, log_to_console=False)
 
         self._order_update_handler = None
 
