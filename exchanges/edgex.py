@@ -445,6 +445,11 @@ class EdgeXClient(BaseExchangeClient):
     async def cancel_order(self, order_id: str) -> OrderResult:
         """Cancel an order with EdgeX using official SDK."""
         try:
+            # cancel之前先查询订单状态，避免重复取消
+            order_info = await self.get_order_info(order_id)
+            if order_info and order_info.status in ['CANCELED', 'FILLED']:
+                self.logger.log(f"Order {order_id} already {order_info.status}, no need to cancel", "INFO")
+                return OrderResult(success=True, error_message=f'Order already {order_info.status}')
             # Create cancel parameters using official SDK
             cancel_params = CancelOrderParams(order_id=order_id)
 

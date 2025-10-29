@@ -351,13 +351,6 @@ class HedgeBotAbc(ABC):
             current_time = time.time()
             elapsed_time = current_time - start_time
             
-            # if elapsed_time > 10:
-            #     # 超时后可能ws没有收到订单更新，需要通过接口重新获取一下订单信息以确保订单状态是最新的
-            #     self.logger.info(f"⏰ 10s timeout reached, rechecking the order latest status for order {order_id}, current status: {self.primary_order_status}")
-            #     order_info = await self.primary_client.get_order_info(order_id)
-            #     self.primary_order_status = order_info.status
-            #     self.logger.info(f"🔄 Rechecked order status: {self.primary_order_status}")
-            
             # Log status every 5 seconds
             if current_time - last_log_time >= log_interval:
                 self.logger.info(f"⏳ Waiting for order fill - Status: {self.primary_order_status}, Elapsed: {elapsed_time:.1f}s")
@@ -400,6 +393,7 @@ class HedgeBotAbc(ABC):
                         try:
                             # Cancel the order using Primary client
                             cancel_result = await self.primary_client.cancel_order(order_id)
+                            self.logger.info(f"Order {order_id} canceled: {cancel_result}")
                             if not cancel_result.success:
                                 self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
                             # 这里如果已经取消的订单api返回也是success将会陷入循环
