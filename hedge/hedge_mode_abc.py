@@ -17,6 +17,7 @@ import sys
 import os
 
 from hedge.lighter_proxy import LighterProxy
+from hedge.hedge_monitor import HedgeMonitor
 from helpers.logger import log_trade_to_csv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -52,6 +53,14 @@ class HedgeBotAbc(ABC):
         self._initialize_primary_client()
 
         self.lighter = LighterProxy(self.ticker, self.logger, position_callback=self._update_lighter_position)
+
+        # Initialize HedgeMonitor
+        self.monitor = HedgeMonitor(
+            ticker=self.ticker,
+            order_quantity=self.order_quantity,
+            logger=self.logger,
+            primary_exchange_name=self.primary_exchange_name(),
+        )
 
         self.waiting_for_lighter_fill = False
         # State management
@@ -259,6 +268,7 @@ class HedgeBotAbc(ABC):
     def _set_stop_flag(self, stop: bool):
         self.stop_flag = stop
         self.lighter.stop_flag = stop
+        self.monitor.set_stop_flag(stop)
 
     def shutdown(self, signum=None, frame=None):
         """Graceful shutdown handler."""
@@ -455,10 +465,15 @@ class HedgeBotAbc(ABC):
         except Exception as e:
             self.logger.error(f"⚠️ Error in trading loop: {e}")
             self.logger.error(f"⚠️ Full traceback: {traceback.format_exc()}")
+            
+            # 发送错误通知
+            await self.monitor.send_error_notification(e, f"尝试执行{side}订单时发生错误")
+            
             return False
         
         operation_start = time.time()  # 每次操作独立计时
         return await self._wait_for_lighter_execution(operation_start)
+
 
     def _determine_close_side_and_quantity(self) -> tuple:
         """确定平仓方向和数量，返回(side, quantity)或(None, None)表示不需要平仓"""
@@ -498,6 +513,27 @@ class HedgeBotAbc(ABC):
             if not await self._execute_hedge_position(open_side, self.order_quantity):
                 break
 
+            # 开仓后发送通知并启动监控
+            try:
+                # 获取策略执行上下文
+                if self.hedge_position_strategy:
+                    strategy_context = self.hedge_position_strategy.get_execution_context()
+                    await self.monitor.send_position_open_notification(strategy_context)
+                else:
+                    self.logger.warning("没有策略实例，无法获取执行上下文")
+                
+                # 启动状态监控任务
+                self.monitor.start_status_monitor(
+                    lambda: self.primary_position,
+                    lambda: self.lighter_position, 
+                    self.hedge_position_strategy,
+                    self.primary_client,
+                    self.lighter
+                )
+                
+            except Exception as e:
+                self.logger.error(f"Failed to send open notification: {e}")
+
             if self.stop_flag:
                 break
 
@@ -519,9 +555,27 @@ class HedgeBotAbc(ABC):
                 if not await self._execute_hedge_position(final_close_side, final_close_quantity):
                     break
 
+            # 平仓完成后发送通知并停止监控
+            try:
+                # 获取策略执行上下文
+                if self.hedge_position_strategy:
+                    strategy_context = self.hedge_position_strategy.get_execution_context()
+                    await self.monitor.send_position_close_notification(strategy_context)
+                else:
+                    self.logger.warning("没有策略实例，无法获取执行上下文")
+                
+                # 停止状态监控任务
+                self.monitor.stop_status_monitor()
+                
+            except Exception as e:
+                self.logger.error(f"Failed to send close notification: {e}")
+
     async def run(self):
         """Run the hedge bot."""
         self.setup_signal_handlers()
+
+        # 发送系统启动通知
+        await self.monitor.send_startup_notification(self.iterations)
 
         try:
             await asyncio.gather(
@@ -535,8 +589,19 @@ class HedgeBotAbc(ABC):
         except Exception as e:
             self.logger.error(f"❌ Error running hedge bot: {e}")
             self.logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+            
+            # 发送系统错误通知
+            await self.monitor.send_error_notification(e, "对冲系统运行时发生错误")
+                
         finally:
             self.logger.info("🔄 Cleaning up...")
+            
+            # 停止状态监控任务
+            self.monitor.stop_status_monitor()
+            
+            # 发送系统停止通知
+            await self.monitor.send_shutdown_notification(self.primary_position, self.lighter_position)
+                
             self.shutdown()
 
 
