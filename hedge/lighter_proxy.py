@@ -247,7 +247,7 @@ class LighterProxy:
 
             # Notify parent of position change through callback
             if self.position_callback:
-                self.position_callback(position_change)
+                self.position_callback(position_change, order_data["avg_filled_price"], Decimal(order_data["filled_base_amount"]))
 
             client_order_index = order_data["client_order_id"]
 
@@ -515,6 +515,8 @@ class LighterProxy:
 
                 # Fallback: Mark as filled to continue trading
                 self.logger.warning("⚠️ Using fallback - marking order as filled to continue trading")
+                if self.position_callback:
+                    self.position_callback(0, -1, -1)
                 self.lighter_order_filled = True
                 # self.waiting_for_lighter_fill = False
                 # self.order_execution_complete = True

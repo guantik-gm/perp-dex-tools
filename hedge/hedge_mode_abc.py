@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import pytz
 from datetime import datetime
 from abc import ABC, abstractmethod
@@ -28,6 +29,15 @@ class Config:
     def __init__(self, config_dict):
         for key, value in config_dict.items():
             setattr(self, key, value)
+
+@dataclass
+class CurrentOrderHandler:
+    current_primary_side: str = None
+    current_primary_price: Decimal = None
+    current_primary_quantity: Decimal = None
+    current_lighter_side: str = None
+    current_lighter_price: Decimal = None
+    current_lighter_quantity: Decimal = None
 
 class HedgeBotAbc(ABC):
     """Trading bot that places post-only orders on primary and hedges with market orders on Lighter."""
@@ -60,6 +70,8 @@ class HedgeBotAbc(ABC):
             order_quantity=self.order_quantity,
             logger=self.logger,
             primary_exchange_name=self.primary_exchange_name(),
+            hedge_bot_order_handler=self.get_current_order_handler,
+            hedge_bot_fee_rate_handler=self.primary_fee_rate
         )
 
         self.waiting_for_lighter_fill = False
@@ -75,9 +87,97 @@ class HedgeBotAbc(ABC):
         self.stuck_order_threshold = 30     # 卡单检测阈值（30次）
         self.stuck_alert_sent = False       # 是否已发送过卡单告警
         
-        # 开平仓策略接口
-        self.hedge_position_strategy = None
+        # 开平仓策略接口 - 支持策略数组
+        self.hedge_strategies = []
+        self.strategy_check_time = 60
 
+        self.current_primary_side = None
+        self.current_primary_price = None
+        self.current_primary_quantity = None
+        self.current_lighter_side = None        
+        self.current_lighter_price = None
+        self.current_lighter_quantity = None
+
+    def get_primary_position(self):
+        return self.primary_position
+    
+    def get_lighter_position(self):
+        return self.lighter_position
+    
+    def get_current_order_handler(self):
+        return CurrentOrderHandler(
+            current_primary_side=self.current_primary_side,
+            current_primary_price=self.current_primary_price,
+            current_primary_quantity=self.current_primary_quantity,
+            current_lighter_side=self.current_lighter_side,
+            current_lighter_price=self.current_lighter_price,
+            current_lighter_quantity=self.current_lighter_quantity
+        )
+
+    def add_strategy(self, strategy):
+        """添加策略到策略数组"""
+        self.hedge_strategies.append(strategy)
+        self.logger.info(f"✅ 添加策略: {strategy.__class__.__name__} (开仓优先级: {strategy.open_priority}, 平仓优先级: {strategy.close_priority})")
+    
+    def get_sorted_strategies(self, operation_type='open'):
+        """获取按优先级排序的策略列表"""
+        if operation_type == 'open':
+            return sorted(self.hedge_strategies, key=lambda s: s.open_priority, reverse=True)
+        else:  # close
+            return sorted(self.hedge_strategies, key=lambda s: s.close_priority, reverse=True)
+    
+    async def wait_open(self):
+        """等待开仓条件满足 - 在hedge_mode_abc中实现，检查所有策略"""
+        self.logger.info("🔍 开始等待开仓条件满足...")
+        
+        while not self.stop_flag:
+            try:
+                # 按优先级顺序检查所有策略
+                strategies = self.get_sorted_strategies('open')
+                
+                for strategy in strategies:
+                    try:
+                        if await strategy.can_open(self):
+                            self.logger.info(f"✅ 开仓策略触发: {strategy.__class__.__name__}")
+                            return strategy  # 返回被触发的策略对象
+                    except Exception as e:
+                        self.logger.error(f"❌ 策略 {strategy.__class__.__name__} 开仓检查异常: {e}")
+                        continue
+                self.logger.info(f"🔄 无开仓策略触发，等待 {self.strategy_check_time} 秒后重新检查...")
+                await asyncio.sleep(self.strategy_check_time)
+                
+            except Exception as e:
+                self.logger.error(f"❌ 开仓策略链检查异常: {e}")
+                await asyncio.sleep(self.strategy_check_time)  # 异常时等待策略检查时间
+        
+        return None  # 如果stop_flag被设置，返回None
+    
+    async def wait_close(self):
+        """等待平仓条件满足 - 在hedge_mode_abc中实现，检查所有策略"""
+        self.logger.info("🔍 开始等待平仓条件满足...")
+        
+        while not self.stop_flag:
+            try:
+                # 按优先级顺序检查所有策略
+                strategies = self.get_sorted_strategies('close')
+                
+                for strategy in strategies:
+                    try:
+                        if await strategy.can_close(self):
+                            self.logger.info(f"✅ 平仓策略触发: {strategy.__class__.__name__}")
+                            return strategy  # 返回被触发的策略对象
+                    except Exception as e:
+                        self.logger.error(f"❌ 策略 {strategy.__class__.__name__} 平仓检查异常: {e}")
+                        continue
+                self.logger.info(f"🔄 无平仓策略触发，等待 {self.strategy_check_time} 秒后重新检查...")
+                await asyncio.sleep(self.strategy_check_time)
+
+            except Exception as e:
+                self.logger.error(f"❌ 平仓策略链检查异常: {e}")
+                await asyncio.sleep(self.strategy_check_time)  # 异常时等待策略检查时间
+
+        return None  # 如果stop_flag被设置，返回None
+        
     @abstractmethod
     def primary_exchange_name(self):
         """Return the name of the primary exchange."""
@@ -93,6 +193,10 @@ class HedgeBotAbc(ABC):
 
     def primary_logger_level(self):
         pass
+    
+    def primary_fee_rate(self) -> Decimal:
+        """Return the taker fee rate for the primary exchange as a Decimal."""
+        return Decimal('0.0001')  # Default to 0.01%, override in subclass if different
 
     def _initialize_log_file(self):
         # Initialize logging to file
@@ -263,10 +367,12 @@ class HedgeBotAbc(ABC):
             self.logger.error(f"Could not setup {self.primary_exchange_name()} WebSocket handlers: {e}")
             sys.exit(1)
 
-    def _update_lighter_position(self, position_change: Decimal):
+    def _update_lighter_position(self, position_change: Decimal, filled_price: Decimal, filled_quantity: Decimal):
         """Handle Lighter position change callback."""
         self.lighter_position += position_change
-        self.logger.info(f"📊 Lighter position updated: {position_change:+} → {self.lighter_position}")
+        self.logger.info(f"📊 Lighter position updated: {position_change:+} → {self.lighter_position}, filled price: {filled_price}, filled quantity: {filled_quantity}")
+        self.current_lighter_price = filled_price
+        self.current_lighter_quantity = filled_quantity
 
     def _set_stop_flag(self, stop: bool):
         self.stop_flag = stop
@@ -421,7 +527,13 @@ class HedgeBotAbc(ABC):
                                 self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
                                 # 取消失败时如果订单状态已经是CANCELED或FILLED，则更新状态，理论上不会再出现卡单状态
                                 if cancel_result.status in ['CANCELED', 'FILLED']:
-                                    self.primary_order_status = cancel_result.status
+                                    if cancel_result.status == 'CANCLED' and cancel_result.filled_size > 0:
+                                        self.logger.info(f"订单已部分填充: {cancel_result.filled_size}, 重置 {self.primary_exchange_name} 订单状态为 FILLED")
+                                        self.primary_order_status = 'FILLED'
+                                        order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
+                                        self.handle_primary_order_update(order_data)
+                                    else:
+                                        self.primary_order_status = cancel_result.status
                         except Exception as e:
                             self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {e}")
                     else:
@@ -456,8 +568,9 @@ class HedgeBotAbc(ABC):
 
         # Store order details for immediate execution
         self.current_lighter_side = lighter_side
-        self.current_lighter_quantity = filled_size
-        self.current_lighter_price = price
+        self.current_primary_side = side
+        self.current_primary_quantity = filled_size
+        self.current_primary_price = price
 
         self.waiting_for_lighter_fill = True
 
@@ -473,8 +586,8 @@ class HedgeBotAbc(ABC):
             if self.waiting_for_lighter_fill:
                 await self.lighter.place_lighter_market_order(
                     self.current_lighter_side,
-                    self.current_lighter_quantity,
-                    self.current_lighter_price
+                    self.current_primary_quantity,
+                    self.current_primary_price
                 )
                 break
 
@@ -532,44 +645,44 @@ class HedgeBotAbc(ABC):
                 self.logger.error(f"❌ Position diff is too large: {self.primary_position + self.lighter_position}")
                 break
 
-            open_side = 'buy'
-            if self.hedge_position_strategy:
-                await self.hedge_position_strategy.wait_open(self)
-                open_side = self.hedge_position_strategy.open_side
-
+            open_side = 'buy'  # 默认值
+            triggered_open_strategy = None
+            # Step 1: 执行开仓策略链，获取触发的策略
+            triggered_open_strategy = await self.wait_open()
+            if triggered_open_strategy:
+                open_side = triggered_open_strategy.open_side
+            else:
+                self.logger.warning("⚠️ 没有策略触发开仓，使用默认方向")
+            
             # Step 1: 开仓
             if not await self._execute_hedge_position(open_side, self.order_quantity):
                 break
 
             # 开仓后发送通知并启动监控
             try:
-                # 获取策略执行上下文
-                if self.hedge_position_strategy:
-                    strategy_context = self.hedge_position_strategy.get_execution_context()
-                    await self.monitor.send_position_open_notification(strategy_context)
-                else:
-                    self.logger.warning("没有策略实例，无法获取执行上下文")
-                
-                # 启动状态监控任务
-                self.monitor.start_status_monitor(
-                    lambda: self.primary_position,
-                    lambda: self.lighter_position, 
-                    self.hedge_position_strategy,
-                    self.primary_client,
-                    self.lighter
-                )
+                if triggered_open_strategy:
+                    # 传递触发的策略给monitor
+                    await self.monitor.send_position_open_notification(triggered_open_strategy)
+                    
+                    # 启动状态监控任务
+                    self.monitor.start_status_monitor(
+                        lambda: self.get_primary_position,
+                        lambda: self.get_lighter_position, 
+                        triggered_open_strategy,
+                        self.primary_client,
+                        self.lighter
+                    )
                 
             except Exception as e:
                 self.logger.error(f"Failed to send open notification: {e}")
 
             if self.stop_flag:
                 break
-
             
-            close_side = 'sell' 
-            if self.hedge_position_strategy:
-                await self.hedge_position_strategy.wait_close(self)
-                close_side = 'sell' if self.hedge_position_strategy.open_side == 'buy' else 'buy'
+            close_side = 'sell' if open_side == 'buy' else 'buy'
+            # Step 2: 执行平仓策略链，等待平仓条件满足
+            triggered_close_strategy = await self.wait_close()
+            
 
             # Step 2: 第一次平仓
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
@@ -585,16 +698,13 @@ class HedgeBotAbc(ABC):
 
             # 平仓完成后发送通知并停止监控
             try:
-                # 获取策略执行上下文
-                if self.hedge_position_strategy:
-                    strategy_context = self.hedge_position_strategy.get_execution_context()
+                if triggered_close_strategy:
+                    # 传递触发的策略给monitor
                     await self.monitor.send_position_close_notification(
-                        strategy_context, 
+                        triggered_close_strategy,
                         primary_client=self.primary_client, 
                         lighter_proxy=self.lighter
                     )
-                else:
-                    self.logger.warning("没有策略实例，无法获取执行上下文")
                 
                 # 停止状态监控任务
                 self.monitor.stop_status_monitor()
