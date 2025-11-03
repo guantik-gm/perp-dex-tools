@@ -19,7 +19,7 @@ class SpreadStrategy(HedgeStrategy):
     def __init__(self, priority=10):
         super().__init__(open_priority=priority, close_priority=priority)
         self.current_spread_sample_count = 3  # 当前价差采样次数（默认值）
-        self.profit_threshold = 0.05
+        self.profit_threshold = 0.1
         
         
         # 价差状态
@@ -95,7 +95,7 @@ class SpreadStrategy(HedgeStrategy):
                             f"(基于实际开仓价差{self.actual_open_spread:.6f})"
                     strategy_result = HedgeStrategyResult.TRIGGER
                 else:
-                    reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} 大于等于 目标阈值{target_threshold:.6f}"
+                    reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} 大于 目标阈值{target_threshold:.6f}"
             else:
                 # 如果没有实际开仓价差，基于基准价差判断
                 if self.average_spread is not None:
@@ -104,7 +104,7 @@ class SpreadStrategy(HedgeStrategy):
                         reason = f"✅ 基准价差平仓：当前价差{current_spread:.6f} 小于 基准阈值{threshold:.6f}"
                         strategy_result = HedgeStrategyResult.PASS
                     else:
-                        reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} 大于等于 基准阈值{threshold:.6f}"
+                        reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} 大于 基准阈值{threshold:.6f}"
                 else:
                     reason = f"⚠️ 无可用价差基准，跳过价差策略平仓判断"
             
@@ -257,32 +257,32 @@ class SpreadStrategy(HedgeStrategy):
             ]
             
             # 显示预计和实际平仓价差
+            predict_spread_msg = ""
             if self.close_spread is not None:
-                base_msg.append(f"📉 预计平仓价差: {self.close_spread:.6f}")
-            
-            if self.actual_close_spread is not None:
-                base_msg.append(f"💰 实际平仓价差: {self.actual_close_spread:.6f}")
-                if self.close_spread is not None:
-                    diff = abs(self.actual_close_spread - Decimal(str(self.close_spread)))
-                    base_msg.append(f"📈 平仓价差差异: {diff:.6f}")
-            else:
-                base_msg.append(f"💰 实际平仓价差: 待更新")
-                
+                predict_spread_msg += f"📉 预计平仓价差: {self.close_spread:.6f}"
             if self.open_spread is not None:
-                base_msg.append(f"📉 预计开仓价差: {self.open_spread:.6f}")
-            # 显示开仓价差对比
-            if self.actual_open_spread is not None:
-                base_msg.append(f"📉 实际开仓价差: {self.actual_open_spread:.6f}")
+                predict_spread_msg += f" - 预计开仓价差: {self.open_spread:.6f}"
+            base_msg.append(predict_spread_msg)
                 
-                # 计算价差收益
-                if self.actual_close_spread is not None:
-                    spread_profit = abs(self.actual_open_spread - self.actual_close_spread)
-                    base_msg.append(f"💸 实际开平仓价差: {spread_profit:.6f}")
+            actual_spread_msg = ""
+            if self.actual_close_spread is not None:
+                actual_spread_msg += f"💰 实际平仓价差: {self.actual_close_spread:.6f}"
+            else:
+                actual_spread_msg += "💰 实际平仓价差: 待更新"
+            if self.actual_open_spread is not None:
+                actual_spread_msg += " - 实际开仓价差: {self.actual_open_spread:.6f}"
+            base_msg.append(actual_spread_msg)
+            
+            spread_diff_msg = ""
+            if self.actual_close_spread is not None and self.actual_open_spread is not None:
+                spread_profit = abs(self.actual_open_spread - self.actual_close_spread)
+                spread_predict = abs(self.open_spread - self.close_spread)
+                spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} - 实际开平仓价差: {spread_profit:.6f}"
+            base_msg.append(spread_diff_msg)
             
             # 添加基准信息
             base_msg.extend([
-                f"📈 中位数价差: {self.average_spread:.6f}",
-                f"💰 预期盈利: {self.profit_threshold:.1%}"
+                f"💰 盈利阈值: {self.profit_threshold:.1%}"
             ])
             
         return base_msg

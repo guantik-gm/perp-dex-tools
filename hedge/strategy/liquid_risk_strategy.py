@@ -116,7 +116,7 @@ class LiquidRiskStrategy(HedgeStrategy):
             self.logger.warning(
                 f"🚨 {exchange_name}清算风险警告: "
                 f"当前价格{current_price:.6f}, 清算价格{liquidation_price:.6f}, "
-                f"距离比例{price_distance_ratio:.2%} 小于等于 {self.risk_threshold:.2%}"
+                f"距离比例{price_distance_ratio:.2%} 小于 {self.risk_threshold:.2%}"
             )
             self.risk_exchange = exchange_name
             self.risk_liquidation_price = liquidation_price

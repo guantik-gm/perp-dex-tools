@@ -37,7 +37,7 @@ class PriceVolatilityStrategy(HedgeStrategy):
             
             # 检查波动率条件
             reason = f"✅ 价格波动率正常: {self.current_volatility:.6f} " \
-            f"({self.current_volatility:.4%}) 小于等于 {self.volatility_threshold:.4f} " \
+            f"({self.current_volatility:.4%}) 小于 {self.volatility_threshold:.4f} " \
             f"({self.volatility_threshold:.2%})"
             strategy_result = HedgeStrategyResult.PASS
             if self.current_volatility is not None and self.current_volatility > self.volatility_threshold:
@@ -65,7 +65,7 @@ class PriceVolatilityStrategy(HedgeStrategy):
                 strategy_result = HedgeStrategyResult.TRIGGER  # 波动率过大，主动触发平仓
             else:
                 reason = f"✅ 价格波动率正常无需平仓: {self.current_volatility:.6f} " \
-                        f"({self.current_volatility:.4%}) 小于等于 {self.volatility_threshold:.4f} " \
+                        f"({self.current_volatility:.4%}) 小于 {self.volatility_threshold:.4f} " \
                         f"({self.volatility_threshold:.2%})"
                 strategy_result = HedgeStrategyResult.PASS
             
