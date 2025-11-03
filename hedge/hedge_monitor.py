@@ -253,18 +253,22 @@ class HedgeMonitor:
                     else:
                         lighter_pnl = (Decimal(str(self.lighter_open_price)) - Decimal(str(self.lighter_close_price))) * Decimal(str(self.lighter_open_quantity))
 
+            total_volume = Decimal(str(self.primary_open_price)) * Decimal(str(self.primary_open_quantity))
             # 计算总收益和收益率
             if lighter_pnl is None:
                 total_pnl = None
                 total_return_rate = None
+                ware_rate = None
             else:
                 total_pnl = primary_pnl + lighter_pnl
                 total_return_rate = (total_pnl / total_capital * 100) if total_capital > 0 else Decimal('0')
+                wear_rate = total_pnl / total_volume * 100
             
             # 预先格式化显示值
             lighter_pnl_str = "-" if lighter_pnl is None else f"${lighter_pnl:.4f}"
             total_pnl_str = "-" if total_pnl is None else f"${total_pnl:.4f}"
             total_return_rate_str = "-" if total_return_rate is None else f"{total_return_rate:.4f}%"
+            ware_rate_str = "-" if wear_rate is None else f"{wear_rate:.4f}%"
             
             # 获取当前持仓状态（理论上平仓后应该为0）
             current_primary_position, current_lighter_position = await self.get_current_positions(primary_client, lighter_proxy)
@@ -291,6 +295,8 @@ class HedgeMonitor:
                       f"   💯 总收益: {total_pnl_str}\n" \
                       f"💎 投入本金: ${total_capital:.2f}\n" \
                       f"📈 总收益率: {total_return_rate_str}\n" \
+                      f"📈 单边交易量: {total_volume}\n" \
+                      f"📈 单边磨损率: {ware_rate_str}\n" \
                       f"📋 当前持仓状态: {self.primary_exchange_name}: {current_primary_position:.4f}, Lighter: {current_lighter_position:.4f}\n" \
                       f"{strategy_msg}{position_warning}"
             
