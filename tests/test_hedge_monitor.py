@@ -17,7 +17,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hedge.hedge_monitor import HedgeMonitor
-from hedge.hedge_strategy import StrategyExecutionContext, DecisionTrigger
+from hedge.strategy.hedge_strategy import StrategyExecutionContext, DecisionTrigger
 from helpers.telegram_bot import TelegramBot
 
 

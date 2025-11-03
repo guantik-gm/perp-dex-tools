@@ -1,3 +1,4 @@
+from exchanges.edgex import EdgeXClient
 import logging
 import os
 import sys
@@ -7,10 +8,11 @@ import sys
 import os
 
 from hedge.hedge_mode_abc import Config, HedgeBotAbc
-from hedge.hedge_strategy import LiquidRiskStrategy, SpreadStrategy, TimingStrategy
+from hedge.strategy.liquid_risk_strategy import LiquidRiskStrategy
+from hedge.strategy.price_volatility_strategy import PriceVolatilityStrategy
+from hedge.strategy.spread_strategy import SpreadStrategy
+from hedge.strategy.timing_strategy import TimingStrategy
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from exchanges.edgex import EdgeXClient
 
 
 class HedgeBot(HedgeBotAbc):
@@ -18,16 +20,21 @@ class HedgeBot(HedgeBotAbc):
 
     def __init__(self, ticker: str, order_quantity: Decimal, fill_timeout: int = 5, iterations: int = 20):
         super().__init__(ticker, order_quantity, fill_timeout, iterations)
-        self.hedge_strategies = [LiquidRiskStrategy(), TimingStrategy(), SpreadStrategy()]
-    
+        self.hedge_strategies = [
+            LiquidRiskStrategy(priority=100),
+            PriceVolatilityStrategy(priority=15),
+            TimingStrategy(priority=20),
+            SpreadStrategy(priority=10)
+        ]
+
     def primary_exchange_name(self):
         return "Edgex"
-    
+
     def primary_client_vars(self):
         return {"account_id": os.getenv('EDGEX_ACCOUNT_ID'),
                 "stark_private_key": os.getenv('EDGEX_STARK_PRIVATE_KEY'),
                 "base_url": os.getenv('EDGEX_BASE_URL', 'https://pro.edgex.exchange')}
-    
+
     def primary_client_init(self):
         """Initialize the EdgeX client."""
         if not all([self.account_id, self.stark_private_key]):

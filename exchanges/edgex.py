@@ -251,6 +251,49 @@ class EdgeXClient(BaseExchangeClient):
         best_ask = Decimal(asks[0]['price']) if asks and len(asks) > 0 else 0
         return best_bid, best_ask
 
+    @query_retry(default_return={'bids': [], 'asks': [], 'timestamp': 0})
+    async def get_order_book_depth(self, contract_id: str, limit: int = 15) -> Dict:
+        """
+        获取完整订单簿深度数据
+        
+        Args:
+            contract_id: 合约ID
+            limit: 深度档位限制（最大15）
+            
+        Returns:
+            {
+                'bids': [{'price': Decimal, 'size': Decimal}, ...],
+                'asks': [{'price': Decimal, 'size': Decimal}, ...],
+                'timestamp': int
+            }
+        """
+        import time
+        
+        depth_params = GetOrderBookDepthParams(contract_id=contract_id, limit=min(limit, 15))
+        order_book = await self.client.quote.get_order_book_depth(depth_params)
+        order_book_data = order_book['data']
+        
+        if not order_book_data:
+            return {'bids': [], 'asks': [], 'timestamp': int(time.time() * 1000)}
+            
+        order_book_entry = order_book_data[0]
+        
+        # 转换为统一格式
+        bids_data = [
+            {'price': Decimal(bid['price']), 'size': Decimal(bid['size'])} 
+            for bid in order_book_entry.get('bids', [])
+        ]
+        asks_data = [
+            {'price': Decimal(ask['price']), 'size': Decimal(ask['size'])} 
+            for ask in order_book_entry.get('asks', [])
+        ]
+        
+        return {
+            'bids': bids_data,
+            'asks': asks_data,
+            'timestamp': int(time.time() * 1000)
+        }
+
     async def get_order_price(self, direction: str) -> Decimal:
         """Get the price of an order with EdgeX using official SDK."""
         best_bid, best_ask = await self.fetch_bbo_prices(self.config.contract_id)
@@ -460,9 +503,9 @@ class EdgeXClient(BaseExchangeClient):
             cancel_result = await self.client.cancel_order(cancel_params)
 
             if not cancel_result or 'data' not in cancel_result:
-                return OrderResult(success=False, error_message='Failed to cancel order')
+                return OrderResult(success=False, status=order_info.status, filled_size=filled_size, price=price, side=side, error_message='Failed to cancel order')
 
-            return OrderResult(success=True)
+            return OrderResult(success=True, status=order_info.status, filled_size=filled_size, price=price, side=side)
 
         except Exception as e:
             return OrderResult(success=False, error_message=str(e))
@@ -578,6 +621,14 @@ class EdgeXClient(BaseExchangeClient):
             raise ValueError("No position found for liquidation price calculation")
         # unrealizePnl, termRealizePnl
         return Decimal(position["totalRealizePnl"])
+    
+    async def get_ticker_position_value(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        # unrealizePnl, termRealizePnl
+        return Decimal(position["positionValue"])
     
     async def get_contract_attributes(self) -> Tuple[str, Decimal]:
         """Get contract ID for a ticker."""

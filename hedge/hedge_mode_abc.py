@@ -12,15 +12,23 @@ import argparse
 import traceback
 import csv
 from decimal import Decimal
-from typing import Tuple
+from typing import List, Tuple
 
 import sys
 import os
 
+from hedge.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
 from hedge.lighter_proxy import LighterProxy
 from hedge.hedge_monitor import HedgeMonitor
 from helpers.logger import log_trade_to_csv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+class HedgeOrderResult:
+    """订单执行结果状态定义"""
+    SUCCESS = "success"          # 订单成功执行
+    FAILED = "failed"           # 订单执行失败
+    RETRY_STRATEGY = "retry_strategy"  # 需要重新进行策略判断
 
 
 class Config:
@@ -50,6 +58,9 @@ class HedgeBotAbc(ABC):
         self.primary_position = Decimal('0')
         self.lighter_position = Decimal('0')
         self.current_order = {}
+
+        # 策略数据共享字典
+        self.triggered_strategies_data = {}
 
         # Primary state
         self.primary_client = None
@@ -82,14 +93,9 @@ class HedgeBotAbc(ABC):
         # Order execution tracking
         self.order_execution_complete = False
         
-        # 卡单检测相关
-        self.consecutive_timeout_count = 0  # 连续超时计数器
-        self.stuck_order_threshold = 30     # 卡单检测阈值（30次）
-        self.stuck_alert_sent = False       # 是否已发送过卡单告警
-        
         # 开平仓策略接口 - 支持策略数组
         self.hedge_strategies = []
-        self.strategy_check_time = 60
+        self.strategy_check_time = 5
 
         self.current_primary_side = None
         self.current_primary_price = None
@@ -117,7 +123,7 @@ class HedgeBotAbc(ABC):
     def add_strategy(self, strategy):
         """添加策略到策略数组"""
         self.hedge_strategies.append(strategy)
-        self.logger.info(f"✅ 添加策略: {strategy.__class__.__name__} (开仓优先级: {strategy.open_priority}, 平仓优先级: {strategy.close_priority})")
+        self.logger.info(f"✅ 添加策略: {strategy.name} (开仓优先级: {strategy.open_priority}, 平仓优先级: {strategy.close_priority})")
     
     def get_sorted_strategies(self, operation_type='open'):
         """获取按优先级排序的策略列表"""
@@ -134,17 +140,34 @@ class HedgeBotAbc(ABC):
             try:
                 # 按优先级顺序检查所有策略
                 strategies = self.get_sorted_strategies('open')
+                passed_strategies = []
                 
+                self.logger.info("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~") 
                 for strategy in strategies:
                     try:
-                        if await strategy.can_open(self):
-                            self.logger.info(f"✅ 开仓策略触发: {strategy.__class__.__name__}")
-                            return strategy  # 返回被触发的策略对象
+                        self.logger.info(f"[{strategy.name}] 开始检测开仓策略")
+                        await strategy.can_open(self)
+                        self.logger.info(f"[{strategy.name}] {strategy.reason}")
+                        if strategy.result == HedgeStrategyResult.TRIGGER:
+                            self.logger.info(f"[{strategy.name}] ✅ 开仓策略触发")
+                            passed_strategies.append(strategy)  # 返回被触发的策略对象
+                            return passed_strategies
+                        elif strategy.result == HedgeStrategyResult.REJECT:
+                            self.logger.info(f"[{strategy.name}] 当前策略开仓条件不满足，强制退出并等待下轮循环")
+                            passed_strategies.clear()
+                            break
+                        elif strategy.result == HedgeStrategyResult.PASS:
+                            self.logger.info(f"[{strategy.name}] ✅ 开仓策略通过")
+                            passed_strategies.append(strategy)
                     except Exception as e:
-                        self.logger.error(f"❌ 策略 {strategy.__class__.__name__} 开仓检查异常: {e}")
+                        self.logger.error(f"[{strategy.name}] ❌ 策略开仓检查异常: {e}")
                         continue
-                self.logger.info(f"🔄 无开仓策略触发，等待 {self.strategy_check_time} 秒后重新检查...")
-                await asyncio.sleep(self.strategy_check_time)
+                # 要么都没有触发为0，只要不为0就肯定都pass
+                if len(passed_strategies) == 0:
+                    self.logger.info(f"🔄 无开仓策略触发，等待 {self.strategy_check_time} 秒后重新检查...")
+                    await asyncio.sleep(self.strategy_check_time)
+                else:
+                    return passed_strategies
                 
             except Exception as e:
                 self.logger.error(f"❌ 开仓策略链检查异常: {e}")
@@ -160,17 +183,33 @@ class HedgeBotAbc(ABC):
             try:
                 # 按优先级顺序检查所有策略
                 strategies = self.get_sorted_strategies('close')
+                passed_strategies = []
                 
+                self.logger.info("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~") 
                 for strategy in strategies:
                     try:
-                        if await strategy.can_close(self):
-                            self.logger.info(f"✅ 平仓策略触发: {strategy.__class__.__name__}")
-                            return strategy  # 返回被触发的策略对象
+                        self.logger.info(f"[{strategy.name}] 开始检测平仓策略")
+                        await strategy.can_close(self)
+                        self.logger.info(f"[{strategy.name}] {strategy.reason}")
+                        if strategy.result == HedgeStrategyResult.TRIGGER:
+                            self.logger.info(f"[{strategy.name}] ✅ 平仓策略触发")
+                            passed_strategies.append(strategy)  # 返回被触发的策略对象
+                            return passed_strategies
+                        elif strategy.result == HedgeStrategyResult.REJECT:
+                            self.logger.info(f"[{strategy.name}] 当前策略平仓条件不满足，强制退出并等待下轮循环")
+                            passed_strategies.clear()
+                            break
+                        elif strategy.result == HedgeStrategyResult.PASS:
+                            self.logger.info(f"[{strategy.name}] ✅ 平仓策略通过")
+                            passed_strategies.append(strategy)
                     except Exception as e:
-                        self.logger.error(f"❌ 策略 {strategy.__class__.__name__} 平仓检查异常: {e}")
+                        self.logger.error(f"[{strategy.name}] ❌ 策略平仓检查异常: {e}")
                         continue
-                self.logger.info(f"🔄 无平仓策略触发，等待 {self.strategy_check_time} 秒后重新检查...")
-                await asyncio.sleep(self.strategy_check_time)
+                if len(passed_strategies) == 0:
+                    self.logger.info(f"🔄 无平仓策略触发，等待 {self.strategy_check_time} 秒后重新检查...")
+                    await asyncio.sleep(self.strategy_check_time)
+                else:
+                    return passed_strategies
 
             except Exception as e:
                 self.logger.error(f"❌ 平仓策略链检查异常: {e}")
@@ -291,7 +330,6 @@ class HedgeBotAbc(ABC):
         self.primary_contract_id = contract_id
         self.primary_tick_size = tick_size
 
-    # todo: 不同的primary可能ws有不同的结构
     async def _setup_primary_websocket(self):
         """Setup Primary websocket for order updates and order book data."""
         if not self.primary_client:
@@ -445,7 +483,7 @@ class HedgeBotAbc(ABC):
             self.logger.error(f"❌ Failed to place {side} order: {order_result.error_message}")
             raise Exception(f"Failed to place order: {order_result.error_message}")
 
-    async def place_primary_post_only_order(self, side: str, quantity: Decimal):
+    async def place_primary_post_only_order(self, side: str, quantity: Decimal, triggered_strategies: List[HedgeStrategy]):
         """Place a post-only order on Primary."""
         if not self.primary_client:
             raise Exception(f"{self.primary_exchange_name()} client not initialized")
@@ -470,11 +508,6 @@ class HedgeBotAbc(ABC):
             
             if self.primary_order_status == 'CANCELED':
                 self.logger.info(f"🔄 Order was canceled, placing new order")
-                # 重置卡单计数器和告警标志，因为成功收到了状态更新
-                if self.consecutive_timeout_count > 0:
-                    self.logger.info(f"✅ WebSocket 状态恢复，重置卡单计数器 (之前: {self.consecutive_timeout_count})")
-                    self.consecutive_timeout_count = 0
-                    self.stuck_alert_sent = False
                 
                 self.primary_order_status = 'NEW'
                 order_id, order_price = await self.place_bbo_order(side, quantity)
@@ -504,56 +537,77 @@ class HedgeBotAbc(ABC):
                     else:
                         self.logger.debug(f"✅ Sell order price {order_price} <= best ask {best_ask}, keeping order")
                 
-                # Check if 10 seconds have passed
-                if elapsed_time > 10:
-                    if should_cancel:
-                        # 增加连续超时计数器
-                        self.consecutive_timeout_count += 1
-                        self.logger.info(f"⏰ 10s timeout reached, canceling order due to unfavorable price (连续超时次数: {self.consecutive_timeout_count}/{self.stuck_order_threshold})")
-                        
-                        # 检查是否达到卡单阈值且未发送过告警
-                        if self.consecutive_timeout_count >= self.stuck_order_threshold and not self.stuck_alert_sent:
-                            await self.monitor.handle_stuck_order(
-                                order_id, order_price, side, best_bid, best_ask, elapsed_time,
-                                self.consecutive_timeout_count
-                            )
-                            self.stuck_alert_sent = True
-                        
-                        try:
-                            # Cancel the order using Primary client
-                            cancel_result = await self.primary_client.cancel_order(order_id)
-                            self.logger.info(f"Order {order_id} canceled: {cancel_result}")
-                            if not cancel_result.success:
-                                self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
-                                # 取消失败时如果订单状态已经是CANCELED或FILLED，则更新状态，理论上不会再出现卡单状态
-                                if cancel_result.status in ['CANCELED', 'FILLED']:
-                                    if cancel_result.status == 'CANCLED' and cancel_result.filled_size > 0:
-                                        self.logger.info(f"订单已部分填充: {cancel_result.filled_size}, 重置 {self.primary_exchange_name} 订单状态为 FILLED")
-                                        self.primary_order_status = 'FILLED'
-                                        order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
-                                        self.handle_primary_order_update(order_data)
-                                    else:
-                                        self.primary_order_status = cancel_result.status
-                        except Exception as e:
-                            self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {e}")
-                    else:
-                        self.logger.info(f"⏰ 10s timeout reached, but order {order_id} is at favorable price (bid: {best_bid}, ask: {best_ask}), continuing to wait")
+                # Check if 15 seconds have passed
+                # 只有超时15s后才需要重新走一遍策略，15s内可以根据最优化重新下单
+                triggered_strategies_need_to_replace_order = triggered_strategies and any([strategy.order_place_timeout_retry() for strategy in triggered_strategies]) and elapsed_time > 15
+                # 价格不利时立即取消重新下单，保证成功率
+                if should_cancel or elapsed_time > 15:
+                    # 触发策略无需重试且无需取消，继续等待
+                    if not triggered_strategies_need_to_replace_order and not should_cancel:
+                        self.logger.info(f"⏰ 15s timeout reached, but order {order_id} is at favorable price (bid: {best_bid}, ask: {best_ask}), continuing to wait")
                         start_time = time.time()  # Reset timer
+                    else:
+                        # 触发策略需要全部重试，或者仅primary order内部should_cancel重试（不返回直接接续循环）
+                        cancel_warning  = f"should cancel order due to unfavorable price" if should_cancel else "15s timeout reached"
+                        self.logger.info(f"⏰ {cancel_warning}, canceling order...")
+                    
+                        cancel_result = await self.primary_client.cancel_order(order_id)
+                        self.logger.info(f"Order {order_id} canceled result: {cancel_result}")
+                        if not cancel_result.success:
+                            self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
+                            # 取消失败时如果订单状态已经是CANCELED或FILLED，则更新状态，理论上不会再出现卡单状态
+                            if cancel_result.status in ['CANCELED', 'FILLED']:
+                                if cancel_result.status == 'FILLED' or (cancel_result.status == 'CANCLED' and cancel_result.filled_size > 0):
+                                    self.logger.info(f"订单已全部或部分成交: {cancel_result.filled_size}, 重置 {self.primary_exchange_name} 订单状态为 FILLED")
+                                    self.primary_order_status = 'FILLED'
+                                    order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
+                                    self.handle_primary_order_update(order_data)
+                                    return HedgeOrderResult.SUCCESS
+                                else:
+                                    # 只有cancel+filled_size为0是真正的取消状态需要重试
+                                    # should_cancel说明当前primary下单价格将会改变，重新计算策略条件（比如价差策略）
+                                    if triggered_strategies_need_to_replace_order or should_cancel:
+                                        self.logger.info(f"📋 订单已真正取消，当前策略需要重新进行策略判断")
+                                        return HedgeOrderResult.RETRY_STRATEGY
+                                    else:
+                                        # 只需内部重试，更新状态等待while即可
+                                        self.primary_order_status = cancel_result.status
+                        else:
+                            # 取消成功，需要重新进行策略判断
+                            # 取消成功的场景下，有可能时间差的原因，ws又返回了FILLED的状态，实际已经成交，这种情况下需要返回开仓成功
+                            if self.primary_order_status == "FILLED":
+                                return HedgeOrderResult.SUCCESS
+                            # should_cancel说明当前primary下单价格将会改变，重新计算策略条件（比如价差策略）
+                            if triggered_strategies_need_to_replace_order or should_cancel:
+                                self.logger.info(f"📋 订单取消成功，当前策略需要重新进行策略判断")
+                                return HedgeOrderResult.RETRY_STRATEGY
+                            else:
+                                self.logger.info("canceled order due to unfavorable price")
+                                # 下轮循环重新下单
+                                self.primary_order_status = cancel_result.status
             elif self.primary_order_status == 'FILLED':
                 self.logger.info(f"✅ Order {order_id} filled successfully after {elapsed_time:.1f}s")
                 # 重置卡单计数器和告警标志，因为订单已成功填充
-                if self.consecutive_timeout_count > 0:
-                    self.logger.info(f"✅ 订单成功填充，重置卡单计数器 (之前: {self.consecutive_timeout_count})")
-                    self.consecutive_timeout_count = 0
-                    self.stuck_alert_sent = False
-                break
+                return HedgeOrderResult.SUCCESS
             else:
                 if self.primary_order_status is not None:
                     self.logger.error(f"❌ Unknown {self.primary_exchange_name()} order status: {self.primary_order_status}")
-                    break
+                    return HedgeOrderResult.FAILED
                 else:
-                    self.logger.debug(f"⏳ No order status update yet, continuing to wait...")
+                    # primary order status 为None的情况，可能是ws没有及时更新，这里可以尝试fetch一下状态
+                    self.logger.info(f"⏳ No order status update yet, order status is: {self.primary_order_status}, websocket stream didnt update, try to fetch order status through REST API")
+                    order_info = await self.primary_client.get_order_info(order_id)
+                    if order_info is not None:
+                        order_data = {'side': order_info.side, 'price': Decimal(order_info.price), 'filled_size': Decimal(order_info.filled_size)}
+                        self.logger.info(f"get order info from REST API: {order_info}")
+                        self.primary_order_status = order_info.status
+                        self.handle_primary_order_update(order_data)
+                    else:
+                        self.logger.info(f"Still cannt fetch order info from REST API, continue to wait...")
                     await asyncio.sleep(0.5)
+        
+        # 如果因为stop_flag退出循环，返回失败状态
+        return HedgeOrderResult.FAILED
 
     def handle_primary_order_update(self, order_data):
         """Handle Primary order updates from WebSocket."""
@@ -584,12 +638,14 @@ class HedgeBotAbc(ABC):
         while not self.order_execution_complete and not self.stop_flag:
             # Check if Primary order filled and we need to place Lighter order
             if self.waiting_for_lighter_fill:
-                await self.lighter.place_lighter_market_order(
+                result = await self.lighter.place_lighter_market_order(
                     self.current_lighter_side,
                     self.current_primary_quantity,
                     self.current_primary_price
                 )
-                break
+                # lighter订单失败重试机制
+                self.order_execution_complete = result is not None
+                # break
 
             await asyncio.sleep(0.01)
             if time.time() - start_time > 180:
@@ -597,12 +653,23 @@ class HedgeBotAbc(ABC):
                 return False
         return not self.stop_flag
 
-    async def _execute_hedge_position(self, side: str, quantity: Decimal) -> bool:
-        """执行完整的对冲订单流程，返回是否成功"""
+    async def _execute_hedge_position(self, side: str, quantity: Decimal, triggered_strategies: List[HedgeStrategy]) -> tuple:
+        """执行完整的对冲订单流程，返回(成功状态, 是否需要重试策略)"""
         self._reset_order_state()
         
         try:
-            await self.place_primary_post_only_order(side, quantity)
+            result = await self.place_primary_post_only_order(side, quantity, triggered_strategies)
+            
+            if result == HedgeOrderResult.RETRY_STRATEGY:
+                # 需要重新进行策略判断
+                self.logger.info(f"🔄 对冲订单执行需要重新执行策略判断")
+                return False, True
+            elif result == HedgeOrderResult.FAILED:
+                # 彻底失败
+                self.logger.error(f"❌ 对冲订单执行彻底失败")
+                return False, False
+            # OrderResult.SUCCESS 继续执行后续流程
+            
         except Exception as e:
             self.logger.error(f"⚠️ Error in trading loop: {e}")
             self.logger.error(f"⚠️ Full traceback: {traceback.format_exc()}")
@@ -610,10 +677,12 @@ class HedgeBotAbc(ABC):
             # 发送错误通知
             await self.monitor.send_error_notification(e, f"尝试执行{side}订单时发生错误")
             
-            return False
+            return False, False
         
+        # 执行对冲部分
         operation_start = time.time()  # 每次操作独立计时
-        return await self._wait_for_lighter_execution(operation_start)
+        success = await self._wait_for_lighter_execution(operation_start)
+        return success, False  # 返回成功状态，不需要重试策略
 
 
     def _determine_close_side_and_quantity(self) -> tuple:
@@ -639,6 +708,11 @@ class HedgeBotAbc(ABC):
             self.logger.info(f"🔄 Trading loop iteration {iterations}")
             self.logger.info("-----------------------------------------------")
 
+            # 执行前前确认lighter的order_book已经就绪，否则lighter无法开仓
+            while not self.lighter.lighter_order_book_ready:
+                self.logger.error(f"lighter's order book not ready, wait for order book data to continue")
+                await asyncio.sleep(10)
+            
             self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
 
             if abs(self.primary_position + self.lighter_position) > 0.2:
@@ -646,29 +720,56 @@ class HedgeBotAbc(ABC):
                 break
 
             open_side = 'buy'  # 默认值
-            triggered_open_strategy = None
+            triggered_open_strategies = None
             # Step 1: 执行开仓策略链，获取触发的策略
-            triggered_open_strategy = await self.wait_open()
-            if triggered_open_strategy:
-                open_side = triggered_open_strategy.open_side
+            triggered_open_strategies = await self.wait_open()
+            if triggered_open_strategies:
+                change_side_strategies = [strategy for strategy in triggered_open_strategies if hasattr(triggered_open_strategies, "open_side")]
+                open_side = triggered_open_strategies[0].open_side if len(change_side_strategies) > 0 else open_side
             else:
                 self.logger.warning("⚠️ 没有策略触发开仓，使用默认方向")
             
-            # Step 1: 开仓
-            if not await self._execute_hedge_position(open_side, self.order_quantity):
+            # Step 1: 开仓（添加重试逻辑）
+            max_retries = 10
+            success = False
+            for retry_count in range(max_retries):
+                success, need_retry_strategy = await self._execute_hedge_position(open_side, self.order_quantity, triggered_open_strategies)
+                
+                if success:
+                    break  # 成功，继续后续流程
+                elif need_retry_strategy and retry_count < max_retries - 1:
+                    self.logger.info(f"🔄 订单超时，重新检查开仓策略条件 (重试 {retry_count + 1}/{max_retries})")
+                    # 重新获取开仓策略
+                    triggered_open_strategies = await self.wait_open()
+                    if triggered_open_strategies:
+                        change_side_strategies = [strategy for strategy in triggered_open_strategies if hasattr(triggered_open_strategies, "open_side")]
+                        open_side = triggered_open_strategies[0].open_side if len(change_side_strategies) > 0 else open_side
+                    else:
+                        self.logger.warning("⚠️ 重试时没有策略触发开仓")
+                        break
+                else:
+                    # 彻底失败或超过重试次数
+                    self.logger.error("❌ 开仓执行失败，退出交易循环")
+                    break
+            
+            # 如果最终未成功，退出
+            if not success:
                 break
+            
+            for strategy in triggered_open_strategies:
+                strategy.after_open_hedge_position(self)
 
             # 开仓后发送通知并启动监控
             try:
-                if triggered_open_strategy:
+                if triggered_open_strategies:
                     # 传递触发的策略给monitor
-                    await self.monitor.send_position_open_notification(triggered_open_strategy)
+                    await self.monitor.send_position_open_notification(open_side, triggered_open_strategies)
                     
                     # 启动状态监控任务
                     self.monitor.start_status_monitor(
                         lambda: self.get_primary_position,
                         lambda: self.get_lighter_position, 
-                        triggered_open_strategy,
+                        triggered_open_strategies,
                         self.primary_client,
                         self.lighter
                     )
@@ -681,15 +782,37 @@ class HedgeBotAbc(ABC):
             
             close_side = 'sell' if open_side == 'buy' else 'buy'
             # Step 2: 执行平仓策略链，等待平仓条件满足
-            triggered_close_strategy = await self.wait_close()
+            triggered_close_strategies = await self.wait_close()
             
 
-            # Step 2: 第一次平仓
+            # Step 2: 第一次平仓（添加重试逻辑）
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
-            if not await self._execute_hedge_position(close_side, self.order_quantity):
+            success = False
+            for retry_count in range(max_retries):
+                success, need_retry_strategy = await self._execute_hedge_position(close_side, self.order_quantity, triggered_close_strategies)
+                
+                if success:
+                    break  # 成功，继续后续流程
+                elif need_retry_strategy and retry_count < max_retries - 1:
+                    self.logger.info(f"🔄 平仓订单超时，重新检查平仓策略条件 (重试 {retry_count + 1}/{max_retries})")
+                    # 重新获取平仓策略
+                    triggered_close_strategies = await self.wait_close()
+                    if not triggered_close_strategies:
+                        self.logger.warning("⚠️ 重试时没有策略触发平仓")
+                        break
+                else:
+                    # 彻底失败或超过重试次数
+                    self.logger.error("❌ 平仓执行失败，退出交易循环")
+                    break
+            
+            # 如果最终未成功，退出
+            if not success:
                 break
+            
+            for strategy in triggered_close_strategies:
+                strategy.after_close_hedge_position(self)
 
-            # Step 3: 剩余平仓
+            # Step 3: 剩余平仓(无需重试策略)
             self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
             if final_close_side:
@@ -698,10 +821,11 @@ class HedgeBotAbc(ABC):
 
             # 平仓完成后发送通知并停止监控
             try:
-                if triggered_close_strategy:
+                if triggered_close_strategies:
                     # 传递触发的策略给monitor
                     await self.monitor.send_position_close_notification(
-                        triggered_close_strategy,
+                        close_side,
+                        triggered_close_strategies,
                         primary_client=self.primary_client, 
                         lighter_proxy=self.lighter
                     )

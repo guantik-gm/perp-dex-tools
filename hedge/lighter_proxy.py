@@ -9,13 +9,13 @@ import time
 import requests
 import traceback
 from decimal import Decimal
-from typing import Tuple
+from typing import Optional, Tuple
 
 from lighter import SignerClient, ApiClient, Configuration
 import sys
 import os
 
-from exchanges.base import query_retry
+from exchanges.base import OrderInfo, query_retry
 from helpers.logger import log_trade_to_csv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +51,7 @@ class LighterProxy:
         self.lighter_order_book_sequence_gap = False
         self.lighter_snapshot_loaded = False
         self.lighter_order_book_lock = asyncio.Lock()
+        self.lighter_last_update_time = time.time()  # 数据新鲜度跟踪
 
         # Lighter WebSocket state
         self.lighter_order_result = None
@@ -134,6 +135,7 @@ class LighterProxy:
             self.lighter_snapshot_loaded = False
             self.lighter_best_bid = None
             self.lighter_best_ask = None
+            self.lighter_last_update_time = time.time()  # 重置时间戳
 
     def update_lighter_order_book(self, side: str, levels: list):
         """Update Lighter order book with new levels."""
@@ -189,6 +191,142 @@ class LighterProxy:
             best_ask = (best_ask_price, best_ask_size)
 
         return best_bid, best_ask
+
+    def get_order_book_levels(self, side: str, limit: int = 10):
+        """
+        获取指定方向的订单簿档位
+        
+        Args:
+            side: 'bids' | 'asks'
+            limit: 返回档位数量限制
+            
+        Returns:
+            按价格排序的档位列表: [{'price': Decimal, 'size': Decimal}, ...]
+        """
+        if side not in ['bids', 'asks']:
+            raise ValueError(f"Invalid side: {side}. Must be 'bids' or 'asks'")
+            
+        levels = self.lighter_order_book[side]
+        
+        if not levels:
+            return []
+        
+        if side == 'bids':
+            # 买单从高到低排序
+            sorted_items = sorted(levels.items(), reverse=True)
+        else:
+            # 卖单从低到高排序
+            sorted_items = sorted(levels.items())
+        
+        return [
+            {'price': price, 'size': size} 
+            for price, size in sorted_items[:limit]
+        ]
+    
+    def get_order_book_depth_data(self, limit: int = 10) -> dict:
+        """
+        获取完整订单簿深度数据，与EdgeX格式保持一致
+        
+        Args:
+            limit: 深度档位限制
+            
+        Returns:
+            {
+                'bids': [{'price': Decimal, 'size': Decimal}, ...],
+                'asks': [{'price': Decimal, 'size': Decimal}, ...],
+                'timestamp': int
+            }
+        """
+        return {
+            'bids': self.get_order_book_levels('bids', limit),
+            'asks': self.get_order_book_levels('asks', limit),
+            'timestamp': int(self.lighter_last_update_time * 1000)
+        }
+
+    def calculate_execution_price(self, side: str, quantity: Decimal) -> Decimal:
+        """
+        基于订单簿深度计算指定数量的taker执行成交量加权平均价格
+        
+        Args:
+            side: 'buy' | 'sell' - 交易方向
+            quantity: 交易数量
+            
+        Returns:
+            Decimal: 成交量加权平均价格
+            
+        Raises:
+            ValueError: 当订单簿流动性不足时
+        """
+        if side not in ['buy', 'sell']:
+            raise ValueError(f"Invalid side: {side}. Must be 'buy' or 'sell'")
+        
+        if quantity <= 0:
+            raise ValueError(f"Invalid quantity: {quantity}. Must be greater than 0")
+        
+        # 获取对应方向的订单簿数据
+        if side == 'buy':
+            # 买单需要消化卖方订单簿（asks）
+            levels = self.get_order_book_levels('asks', limit=50)  # 获取更多档位确保流动性
+        else:
+            # 卖单需要消化买方订单簿（bids）
+            levels = self.get_order_book_levels('bids', limit=50)
+        
+        if not levels:
+            raise ValueError(f"No order book data available for side: {side}")
+        
+        # 吃单逻辑：按价格优先级逐档消化
+        remaining_quantity = quantity
+        total_cost = Decimal('0')
+        total_filled = Decimal('0')
+        
+        for level in levels:
+            if remaining_quantity <= 0:
+                break
+                
+            level_price = level['price']
+            level_size = level['size']
+            
+            # 计算这一档能成交的数量
+            fill_quantity = min(remaining_quantity, level_size)
+            
+            # 累计成本和成交量
+            total_cost += fill_quantity * level_price
+            total_filled += fill_quantity
+            remaining_quantity -= fill_quantity
+            
+            if self.logger:
+                self.logger.debug(f"💱 吃单档位 - 价格: {level_price:.6f}, "
+                                f"档位量: {level_size:.6f}, "
+                                f"成交量: {fill_quantity:.6f}, "
+                                f"剩余: {remaining_quantity:.6f}")
+        
+        # 检查是否有足够的流动性
+        if remaining_quantity > 0:
+            filled_ratio = (total_filled / quantity) * 100
+            if self.logger:
+                self.logger.warning(f"⚠️ 订单簿流动性不足 - 需要: {quantity:.6f}, "
+                                  f"可成交: {total_filled:.6f} ({filled_ratio:.1f}%)")
+            
+            # 如果成交比例太低，抛出异常
+            if filled_ratio < 80:  # 至少要能成交80%
+                raise ValueError(f"Insufficient liquidity: only {filled_ratio:.1f}% can be filled")
+        
+        # 计算成交量加权平均价格
+        if total_filled > 0:
+            weighted_avg_price = total_cost / total_filled
+            
+            if self.logger:
+                best_price = levels[0]['price'] if levels else Decimal('0')
+                price_impact = abs(weighted_avg_price - best_price) / best_price * 100 if best_price > 0 else 0
+                self.logger.info(f"🎯 {side.upper()}单执行价格计算完成 - "
+                               f"数量: {total_filled:.6f}, "
+                               f"加权均价: {weighted_avg_price:.6f}, "
+                               f"最优价: {best_price:.6f}, "
+                               f"价格冲击: {price_impact:.2f}%")
+            
+            return weighted_avg_price
+        else:
+            raise ValueError("No quantity could be filled")
 
     def get_lighter_mid_price(self) -> Decimal:
         """Get mid price from Lighter order book."""
@@ -343,6 +481,7 @@ class LighterProxy:
                                     self.update_lighter_order_book("asks", asks)
                                     self.lighter_snapshot_loaded = True
                                     self.lighter_order_book_ready = True
+                                    self.lighter_last_update_time = time.time()  # 更新时间戳
 
                                     self.logger.info(f"✅ Lighter order book snapshot loaded with "
                                                      f"{len(self.lighter_order_book['bids'])} bids and "
@@ -365,6 +504,7 @@ class LighterProxy:
                                     # Update the order book with new data
                                     self.update_lighter_order_book("bids", order_book.get("bids", []))
                                     self.update_lighter_order_book("asks", order_book.get("asks", []))
+                                    self.lighter_last_update_time = time.time()  # 更新时间戳
 
                                     # Validate order book integrity after update
                                     if not self.validate_order_book_integrity():
@@ -409,8 +549,17 @@ class LighterProxy:
 
                         except asyncio.TimeoutError:
                             timeout_count += 1
+                            data_age = time.time() - self.lighter_last_update_time
+                            
                             if timeout_count % 3 == 0:
-                                self.logger.warning(f"⏰ No message from Lighter websocket for {timeout_count} seconds")
+                                self.logger.warning(f"⏰ No message from Lighter websocket for {timeout_count}s, "
+                                                   f"order book数据已{data_age:.1f}s未更新")
+                            
+                            # 数据超过30秒未更新时主动重连
+                            if data_age >= 60:
+                                self.logger.warning(f"🔄 Order book数据过时({data_age:.1f}s)，主动重连以刷新数据")
+                                self.lighter_order_book_ready = False
+                                break  # 跳出内层循环，触发重连
                             continue
                         except websockets.exceptions.ConnectionClosed as e:
                             self.logger.warning(f"⚠️ Lighter websocket connection closed: {e}")
@@ -454,6 +603,10 @@ class LighterProxy:
             self._initialize_lighter_client()
 
         best_bid, best_ask = self.get_lighter_best_levels()
+        
+        if best_bid is None or best_ask is None:
+            self.logger.error(f"❌ Error placing Lighter order, best_bid: {best_bid} or best_ask: {best_ask} is None")
+            return None
 
         # Determine order parameters
         if lighter_side.lower() == 'buy':
@@ -514,9 +667,15 @@ class LighterProxy:
                 self.logger.error(f"❌ Order state - Filled: {self.lighter_order_filled}")
 
                 # Fallback: Mark as filled to continue trading
-                self.logger.warning("⚠️ Using fallback - marking order as filled to continue trading")
+                self.logger.warning("⚠️ Using fallback - Fetching order info from account position")
                 if self.position_callback:
-                    self.position_callback(0, -1, -1)
+                    order_info = await self.get_filled_order_info(client_order_index)
+                    if order_info:
+                        self.logger.info(f"get order info success: {order_info}")
+                        self.position_callback(order_info.size, order_info.price, order_info.size)
+                    else:
+                        self.logger.warning(f"still failed to get order info, set -1 for lighter order and marking order as filled to continue trading")
+                        self.position_callback(0, -1, -1)
                 self.lighter_order_filled = True
                 # self.waiting_for_lighter_fill = False
                 # self.order_execution_complete = True
@@ -610,4 +769,34 @@ class LighterProxy:
             raise ValueError("No position found for liquidation price calculation")
         # unrealized_pnl, realized_pnl
         return Decimal(position.realized_pnl)
+    
+    async def get_ticker_position_value(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        # unrealized_pnl, realized_pnl
+        return Decimal(position.position_value)
         
+    async def get_filled_order_info(self, order_id: str) -> Optional[OrderInfo]:
+        """Get order information from Lighter using official SDK."""
+        try:
+            position = self.get_ticker_position()
+            # Look for the specific order in account positions
+            position_amt = abs(float(position.position_value))
+            if position_amt > 0.001:  # Only include significant positions
+                return OrderInfo(
+                    order_id=order_id,
+                    side="buy" if float(position.position) > 0 else "sell",
+                    size=Decimal(str(position.position)),
+                    price=Decimal(str(position.avg_entry_price)),
+                    status="FILLED",  # Positions are filled orders
+                    filled_size=Decimal(position.position),
+                    remaining_size=Decimal('0')
+                )
+
+            return None
+
+        except Exception as e:
+            self.logger.log(f"Error getting order info: {e}", "ERROR")
+            return None
