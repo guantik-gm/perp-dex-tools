@@ -730,15 +730,14 @@ class HedgeBotAbc(ABC):
                 self.logger.warning("⚠️ 没有策略触发开仓，使用默认方向")
             
             # Step 1: 开仓（添加重试逻辑）
-            max_retries = 10
             success = False
-            for retry_count in range(max_retries):
+            retry_count = 0
+            while not success:
                 success, need_retry_strategy = await self._execute_hedge_position(open_side, self.order_quantity, triggered_open_strategies)
                 
-                if success:
-                    break  # 成功，继续后续流程
-                elif need_retry_strategy and retry_count < max_retries - 1:
-                    self.logger.info(f"🔄 订单超时，重新检查开仓策略条件 (重试 {retry_count + 1}/{max_retries})")
+                if need_retry_strategy:
+                    retry_count += 1 
+                    self.logger.info(f"🔄 订单超时，重新检查开仓策略条件 (重试 {retry_count})")
                     # 重新获取开仓策略
                     triggered_open_strategies = await self.wait_open()
                     if triggered_open_strategies:
@@ -748,7 +747,7 @@ class HedgeBotAbc(ABC):
                         self.logger.warning("⚠️ 重试时没有策略触发开仓")
                         break
                 else:
-                    # 彻底失败或超过重试次数
+                    # 彻底失败
                     self.logger.error("❌ 开仓执行失败，退出交易循环")
                     break
             
@@ -788,20 +787,20 @@ class HedgeBotAbc(ABC):
             # Step 2: 第一次平仓（添加重试逻辑）
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             success = False
-            for retry_count in range(max_retries):
+            retry_count = 0
+            while not success:
                 success, need_retry_strategy = await self._execute_hedge_position(close_side, self.order_quantity, triggered_close_strategies)
                 
-                if success:
-                    break  # 成功，继续后续流程
-                elif need_retry_strategy and retry_count < max_retries - 1:
-                    self.logger.info(f"🔄 平仓订单超时，重新检查平仓策略条件 (重试 {retry_count + 1}/{max_retries})")
+                if need_retry_strategy:
+                    retry_count += 1 
+                    self.logger.info(f"🔄 平仓订单超时，重新检查平仓策略条件 (重试 {retry_count})")
                     # 重新获取平仓策略
                     triggered_close_strategies = await self.wait_close()
                     if not triggered_close_strategies:
                         self.logger.warning("⚠️ 重试时没有策略触发平仓")
                         break
                 else:
-                    # 彻底失败或超过重试次数
+                    # 彻底失败
                     self.logger.error("❌ 平仓执行失败，退出交易循环")
                     break
             
