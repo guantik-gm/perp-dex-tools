@@ -715,7 +715,7 @@ class HedgeBotAbc(ABC):
             
             self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
 
-            if abs(self.primary_position + self.lighter_position) > 0.2:
+            if abs(self.primary_position + self.lighter_position) > self.order_quantity * 2:
                 self.logger.error(f"❌ Position diff is too large: {self.primary_position + self.lighter_position}")
                 break
 

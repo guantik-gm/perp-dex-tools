@@ -36,7 +36,7 @@ class LighterProxy:
         self.api_client = None
         self.lighter_client = None 
         self.lighter_client = self._initialize_lighter_client()
-        self.lighter_market_index, self.base_amount_multiplier, self.price_multiplier = self._get_lighter_market_config()
+        self.lighter_market_index, self.base_amount_multiplier, self.price_multiplier, self.tick_size = self._get_lighter_market_config()
         self.logger.info(f"✅ Lighter market config - Market Index: {self.lighter_market_index}, "
                          f"Base Amount Multiplier: {self.base_amount_multiplier}, "
                          f"Price Multiplier: {self.price_multiplier}")
@@ -90,7 +90,7 @@ class LighterProxy:
             self.logger.info("✅ Lighter client initialized successfully")
         return self.lighter_client
 
-    def _get_lighter_market_config(self) -> Tuple[int, int, int]:
+    def _get_lighter_market_config(self) -> Tuple[int, int, int, Decimal]:
         """Get Lighter market configuration."""
         url = f"{self.lighter_base_url}/api/v1/orderBooks"
         headers = {"accept": "application/json"}
@@ -109,9 +109,12 @@ class LighterProxy:
 
             for market in data["order_books"]:
                 if market["symbol"] == self.ticker:
-                    return (market["market_id"],
-                            pow(10, market["supported_size_decimals"]),
-                            pow(10, market["supported_price_decimals"]))
+                    price_multiplier = pow(10, market["supported_price_decimals"])
+                    return (market["market_id"], 
+                           pow(10, market["supported_size_decimals"]), 
+                           price_multiplier,
+                           Decimal("1") / (Decimal("10") ** market["supported_price_decimals"])
+                           )
 
             raise Exception(f"Ticker {self.ticker} not found")
 
@@ -346,9 +349,9 @@ class LighterProxy:
             raise Exception("Cannot calculate order price - missing order book data")
 
         if is_ask:
-            order_price = best_bid[0] + Decimal('0.1')
+            order_price = best_bid[0] + self.tick_size
         else:
-            order_price = best_ask[0] - Decimal('0.1')
+            order_price = best_ask[0] - self.tick_size
 
         return order_price
 
