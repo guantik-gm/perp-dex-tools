@@ -95,7 +95,7 @@ class HedgeBotAbc(ABC):
         
         # 开平仓策略接口 - 支持策略数组
         self.hedge_strategies = []
-        self.strategy_check_time = 5
+        self.strategy_check_time = 1
 
         self.current_primary_side = None
         self.current_primary_price = None
@@ -289,15 +289,15 @@ class HedgeBotAbc(ABC):
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)  # Console shows important info only
 
-        # Create professional formatters with timestamp
+        # Create professional formatters with timestamp and module info
         file_formatter = TimeZoneFormatter(
-            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s',
+            '%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S',
             tz=timezone
         )
         
         console_formatter = TimeZoneFormatter(
-            '%(asctime)s.%(msecs)03d - %(levelname)s - %(name)s - %(message)s',
+            '%(asctime)s.%(msecs)03d - %(levelname)s - %(name)s - [%(filename)s:%(lineno)d] - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S',
             tz=timezone
         )
@@ -523,19 +523,19 @@ class HedgeBotAbc(ABC):
                 
                 # Log price comparison details
                 if side == 'buy':
-                    self.logger.debug(f"📊 Price check - Buy order: {order_price}, Best bid: {best_bid}, Best ask: {best_ask}")
+                    self.logger.info(f"📊 Price check - Buy order: {order_price}, Best bid: {best_bid}, Best ask: {best_ask}")
                     if order_price < best_bid:
                         should_cancel = True
-                        self.logger.debug(f"💡 Buy order price {order_price} < best bid {best_bid}, should cancel")
+                        self.logger.info(f"💡 Buy order price {order_price} < best bid {best_bid}, should cancel")
                     else:
-                        self.logger.debug(f"✅ Buy order price {order_price} >= best bid {best_bid}, keeping order")
+                        self.logger.info(f"✅ Buy order price {order_price} >= best bid {best_bid}, keeping order")
                 else:
-                    self.logger.debug(f"📊 Price check - Sell order: {order_price}, Best bid: {best_bid}, Best ask: {best_ask}")
+                    self.logger.info(f"📊 Price check - Sell order: {order_price}, Best bid: {best_bid}, Best ask: {best_ask}")
                     if order_price > best_ask:
                         should_cancel = True
-                        self.logger.debug(f"💡 Sell order price {order_price} > best ask {best_ask}, should cancel")
+                        self.logger.info(f"💡 Sell order price {order_price} > best ask {best_ask}, should cancel")
                     else:
-                        self.logger.debug(f"✅ Sell order price {order_price} <= best ask {best_ask}, keeping order")
+                        self.logger.info(f"✅ Sell order price {order_price} <= best ask {best_ask}, keeping order")
                 
                 # Check if 15 seconds have passed
                 # 只有超时15s后才需要重新走一遍策略，15s内可以根据最优化重新下单
@@ -816,7 +816,7 @@ class HedgeBotAbc(ABC):
             self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
             if final_close_side:
-                if not await self._execute_hedge_position(final_close_side, final_close_quantity):
+                if not await self._execute_hedge_position(final_close_side, final_close_quantity, triggered_close_strategies):
                     break
 
             # 平仓完成后发送通知并停止监控

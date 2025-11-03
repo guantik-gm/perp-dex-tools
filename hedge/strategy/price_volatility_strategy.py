@@ -14,10 +14,10 @@ class PriceVolatilityStrategy(HedgeStrategy):
         super().__init__(open_priority=priority, close_priority=priority)
         # 复用SpreadStrategy的采样配置
         self.sample_count_range = (20, 40)
-        self.cache_duration = 60
+        self.cache_duration = 5 * 60
         # 价格波动率阈值配置
-        # BTC 1~2%, 山寨5%
-        self.volatility_threshold = 0.01
+        # BTC 0.05%~0.08%, 山寨00.1%~0.15%
+        self.volatility_threshold = 0.005
         
         # 价格波动率状态
         self.current_volatility = None
@@ -36,13 +36,13 @@ class PriceVolatilityStrategy(HedgeStrategy):
             await self.calculate_price_volatility(hedge_bot)
             
             # 检查波动率条件
-            reason = f"✅ 价格波动率正常: {self.current_volatility:.6f} "
-            f"({self.current_volatility:.4%}) &lt;= {self.volatility_threshold:.4f} "
+            reason = f"✅ 价格波动率正常: {self.current_volatility:.6f} " \
+            f"({self.current_volatility:.4%}) 小于等于 {self.volatility_threshold:.4f} " \
             f"({self.volatility_threshold:.2%})"
             strategy_result = HedgeStrategyResult.PASS
             if self.current_volatility is not None and self.current_volatility > self.volatility_threshold:
-                reason = f"⚠️ 价格波动率过大暂停开仓: {self.current_volatility:.6f} "
-                f"({self.current_volatility:.4%}) &gt; {self.volatility_threshold:.4f} "
+                reason = f"⚠️ 价格波动率过大暂停开仓: {self.current_volatility:.6f} " \
+                f"({self.current_volatility:.4%}) 大于 {self.volatility_threshold:.4f} " \
                 f"({self.volatility_threshold:.2%})"
                 strategy_result = HedgeStrategyResult.REJECT  # 波动率过大，禁止开仓，拦截后续策略的判断进入下一轮循环
             self._set_strategy_context(strategy_result, reason) # 只拦截开仓，不允许直接开仓，交由后续的策略判断
@@ -51,9 +51,27 @@ class PriceVolatilityStrategy(HedgeStrategy):
     
     async def can_close(self, hedge_bot):
         """检查是否需要因波动率过大而平仓"""
-        # 价格波动率策略主要用于控制开仓，一般不主动触发平仓
-        # 如果需要，可以在这里实现基于波动率的平仓逻辑
-        self._set_strategy_context(result=HedgeStrategyResult.PASS, reason="波动率策略暂无平仓检测逻辑")
+        self.logger = hedge_bot.logger
+        
+        try:
+            # 计算当前价格波动率
+            await self.calculate_price_volatility(hedge_bot)
+            
+            # 检查波动率条件
+            if self.current_volatility is not None and self.current_volatility > self.volatility_threshold:
+                reason = f"⚠️ 价格波动率过大触发平仓: {self.current_volatility:.6f} " \
+                        f"({self.current_volatility:.4%}) 大于 {self.volatility_threshold:.4f} " \
+                        f"({self.volatility_threshold:.2%})"
+                strategy_result = HedgeStrategyResult.TRIGGER  # 波动率过大，主动触发平仓
+            else:
+                reason = f"✅ 价格波动率正常无需平仓: {self.current_volatility:.6f} " \
+                        f"({self.current_volatility:.4%}) 小于等于 {self.volatility_threshold:.4f} " \
+                        f"({self.volatility_threshold:.2%})"
+                strategy_result = HedgeStrategyResult.PASS
+            
+            self._set_strategy_context(strategy_result, reason)
+        except Exception as e:
+            self._set_strategy_context(result=HedgeStrategyResult.PASS, reason=f"❌ 价格波动率检查失败: {e}")
     
     def _get_msgs(self) -> List[str]:
         return [
@@ -84,16 +102,13 @@ class PriceVolatilityStrategy(HedgeStrategy):
                     self.logger.error("❌ 无法计算价格波动率：所有采样都失败了")
                 raise Exception("无法计算价格波动率：所有采样都失败了")
             
-            # 存储到共享数据（如果SpreadStrategy还没有存储）
-            if 'sampling_data' not in hedge_bot.triggered_strategies_data:
-                shared_data = {
-                    'samples': samples,
-                    'sampling_time': current_time,
-                    'sample_count': len(samples)
-                }
-                hedge_bot.triggered_strategies_data['sampling_data'] = shared_data
-            else:
-                shared_data = hedge_bot.triggered_strategies_data['sampling_data']
+            # 存储到共享数据
+            shared_data = {
+                'samples': samples,
+                'sampling_time': current_time,
+                'sample_count': len(samples)
+            }
+            hedge_bot.triggered_strategies_data['sampling_data'] = shared_data
         else:
             # 使用有效的共享数据
             if self.logger:

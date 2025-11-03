@@ -41,11 +41,20 @@ class LiquidRiskStrategy(HedgeStrategy):
             self._set_strategy_context(result=HedgeStrategyResult.PASS, reason="❌ 风险检查失败: {e}")
     
     def _get_msgs(self) -> List[str]:
+        # 安全地获取数据，避免 None 值格式化错误
+        risk_exchange_str = self.risk_exchange if self.risk_exchange is not None else "无"
+        risk_liquidation_price_str = f"{self.risk_liquidation_price:.6f}" if self.risk_liquidation_price is not None else "无"
+        
+        # 安全地获取 price_data
+        price_data = getattr(self, 'data', {}).get('price_data', {})
+        current_price = price_data.get('primary_mid', 0) if price_data else 0
+        current_price_str = f"{current_price:.6f}" if current_price else "0.000000"
+        
         return [
-                    f"🏦 风险交易所: {self.risk_exchange}",
-                    f"💰 清算价格: {self.risk_liquidation_price:.6f}",
-                    f"📊 风险阈值: {self.risk_threshold:.1%}",
-                    f"📊 当前价格: {self.data['price_data'].get('primary_mid', 0):.6f}",
+            f"🏦 风险交易所: {risk_exchange_str}",
+            f"💰 清算价格: {risk_liquidation_price_str}",
+            f"📊 风险阈值: {self.risk_threshold:.1%}",
+            f"📊 当前价格: {current_price_str}",
         ]
     
     async def _check_liquidation_risk(self, hedge_bot, current_sample):
@@ -107,7 +116,7 @@ class LiquidRiskStrategy(HedgeStrategy):
             self.logger.warning(
                 f"🚨 {exchange_name}清算风险警告: "
                 f"当前价格{current_price:.6f}, 清算价格{liquidation_price:.6f}, "
-                f"距离比例{price_distance_ratio:.2%} &lt;= {self.risk_threshold:.2%}"
+                f"距离比例{price_distance_ratio:.2%} 小于等于 {self.risk_threshold:.2%}"
             )
             self.risk_exchange = exchange_name
             self.risk_liquidation_price = liquidation_price

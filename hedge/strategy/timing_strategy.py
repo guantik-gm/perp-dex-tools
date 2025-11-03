@@ -10,9 +10,9 @@ class TimingStrategy(HedgeStrategy):
     
     def __init__(self, priority=20):
         super().__init__(open_priority=priority, close_priority=priority)
-        self.open_wait_range = (1, 5)
-        # self.close_wait_range = (10, 20)
-        self.close_wait_range = (2, 5)
+        self.open_wait_range = (0.5, 1.5)
+        self.close_wait_range = (10, 20)
+        # self.close_wait_range = (2, 3)
         
         # 时间控制状态
         self.next_open_time = self.schedule_next_open(*self.open_wait_range)

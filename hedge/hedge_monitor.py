@@ -291,10 +291,13 @@ class HedgeMonitor:
                       f"   💯 总收益: {total_pnl_str}\n" \
                       f"💎 投入本金: ${total_capital:.2f}\n" \
                       f"📈 总收益率: {total_return_rate_str}\n" \
-                      f"📋 当前持仓状态: {self.primary_exchange_name}={current_primary_position:.4f}, Lighter={current_lighter_position:.4f}\n" \
+                      f"📋 当前持仓状态: {self.primary_exchange_name}: {current_primary_position:.4f}, Lighter: {current_lighter_position:.4f}\n" \
                       f"{strategy_msg}{position_warning}"
-
-            self.telegram_bot.send_text(close_msg)
+            
+            result = self.telegram_bot.send_text(close_msg)
+            self.logger.info(f"telegram 消息通知结果: {result}")
+            if not result.get('ok'):
+                self.logger.info(f"telegram 通知消息失败: {close_msg}")
             
         except Exception as e:
             self.logger.error(f"Failed to send position close notification: {e}")

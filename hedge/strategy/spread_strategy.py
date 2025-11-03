@@ -63,7 +63,7 @@ class SpreadStrategy(HedgeStrategy):
             
             if float(current_spread) > threshold_value:
                 self.open_spread = current_spread  # 记录预计开仓价差
-                reason = f"✅ 当前价差满足开仓条件：{current_spread:.6f} > {threshold_value:.6f} (基准×{1+self.profit_threshold:.3f})"
+                reason = f"✅ 当前价差满足开仓条件：{current_spread:.6f} 大于 {threshold_value:.6f} (基准×{1+self.profit_threshold:.3f})"
                 strategy_result = HedgeStrategyResult.PASS
                 
             self._set_strategy_context(strategy_result, reason)
@@ -91,20 +91,20 @@ class SpreadStrategy(HedgeStrategy):
                 target_threshold = self.actual_open_spread * (Decimal('1') - Decimal(str(self.profit_threshold)) - fee_cost_factor)
                 
                 if float(current_spread) < float(target_threshold):
-                    reason = f"✅ 价差收敛平仓：当前价差{current_spread:.6f} < 目标阈值{target_threshold:.6f} " \
+                    reason = f"✅ 价差收敛平仓：当前价差{current_spread:.6f} 小于 目标阈值{target_threshold:.6f} " \
                             f"(基于实际开仓价差{self.actual_open_spread:.6f})"
                     strategy_result = HedgeStrategyResult.TRIGGER
                 else:
-                    reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} >= 目标阈值{target_threshold:.6f}"
+                    reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} 大于等于 目标阈值{target_threshold:.6f}"
             else:
                 # 如果没有实际开仓价差，基于基准价差判断
                 if self.average_spread is not None:
                     threshold = float(self.average_spread) * (1 - self.profit_threshold)
                     if float(current_spread) < threshold:
-                        reason = f"✅ 基准价差平仓：当前价差{current_spread:.6f} < 基准阈值{threshold:.6f}"
+                        reason = f"✅ 基准价差平仓：当前价差{current_spread:.6f} 小于 基准阈值{threshold:.6f}"
                         strategy_result = HedgeStrategyResult.PASS
                     else:
-                        reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} >= 基准阈值{threshold:.6f}"
+                        reason = f"[价差策略] 未触发平仓: 当前价差{current_spread:.6f} 大于等于 基准阈值{threshold:.6f}"
                 else:
                     reason = f"⚠️ 无可用价差基准，跳过价差策略平仓判断"
             
@@ -139,7 +139,7 @@ class SpreadStrategy(HedgeStrategy):
                     # 🔍 关键逻辑：让市场数据决定最优交易方向
                     # 比较两个交易所的中间价，选择盈利更大的方向
                     primary_mid = (primary_bid + primary_ask) / Decimal('2')
-                    lighter_mid = await hedge_bot.lighter.get_lighter_mid_price()
+                    lighter_mid = hedge_bot.lighter.get_lighter_mid_price()
                     
                     # 动态判断交易方向：总是选择能赚取价差的方向
                     if lighter_mid > primary_mid:
@@ -148,13 +148,13 @@ class SpreadStrategy(HedgeStrategy):
                             # Primary maker买单价格（参考EdgeX place_open_order逻辑）
                             primary_exec_price = primary_ask - hedge_bot.primary_tick_size
                             # Lighter taker卖单价格（基于订单簿深度）
-                            lighter_exec_price = await hedge_bot.lighter.calculate_execution_price('sell', trade_quantity)
+                            lighter_exec_price = hedge_bot.lighter.calculate_execution_price('sell', trade_quantity)
                             trade_type = "价差收敛开仓"
                         else:  # 平仓：Primary卖出，Lighter买入
                             # Primary maker卖单价格
                             primary_exec_price = primary_bid + hedge_bot.primary_tick_size
                             # Lighter taker买单价格（基于订单簿深度）
-                            lighter_exec_price = await hedge_bot.lighter.calculate_execution_price('buy', trade_quantity)
+                            lighter_exec_price = hedge_bot.lighter.calculate_execution_price('buy', trade_quantity)
                             trade_type = "价差收敛平仓"
                     else:
                         # 情况2：Primary更贵 → 传统套利策略（做多价差）
@@ -162,13 +162,13 @@ class SpreadStrategy(HedgeStrategy):
                             # Primary maker卖单价格
                             primary_exec_price = primary_bid + hedge_bot.primary_tick_size
                             # Lighter taker买单价格（基于订单簿深度）
-                            lighter_exec_price = await hedge_bot.lighter.calculate_execution_price('buy', trade_quantity)
+                            lighter_exec_price = hedge_bot.lighter.calculate_execution_price('buy', trade_quantity)
                             trade_type = "价格倒挂开仓"
                         else:  # 平仓：Primary买入，Lighter卖出
                             # Primary maker买单价格
                             primary_exec_price = primary_ask - hedge_bot.primary_tick_size
                             # Lighter taker卖单价格（基于订单簿深度）
-                            lighter_exec_price = await hedge_bot.lighter.calculate_execution_price('sell', trade_quantity)
+                            lighter_exec_price = hedge_bot.lighter.calculate_execution_price('sell', trade_quantity)
                             trade_type = "价格倒挂平仓"
                     
                     # 计算执行价差（总是正值，表示可获得的盈利）
@@ -213,7 +213,6 @@ class SpreadStrategy(HedgeStrategy):
             if self.logger:
                 self.logger.info(f"✅ {'平仓' if is_closing else '开仓'}稳定执行价差: {stable_spread:.6f} (基于{len(spreads)}个样本)")
                 self.logger.info(f"🎯 自适应策略分布: {direction_counts}")
-                self.logger.info(f"💡 策略优势: 同时捕捉价差收敛和价格倒挂机会")
             
             return stable_spread
             
