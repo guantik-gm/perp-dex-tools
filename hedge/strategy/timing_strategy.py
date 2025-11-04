@@ -168,6 +168,7 @@ class TimingStrategy(HedgeStrategy):
 
     def after_close_hedge_position(self, hedge_bot):
         """任何策略平仓后，设置时间策略的下次开仓时间"""
+        self.schedule_next_open(*self.open_wait_range)
         # 记录本次持仓时长
         if self.position_open_time:
             try:
