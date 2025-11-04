@@ -190,7 +190,7 @@ class HedgeMonitor:
         except Exception as notify_error:
             self.logger.error(f"Failed to send error notification: {notify_error}")
 
-    async def send_position_open_notification(self, times: int, side: str, strategies: List[HedgeStrategy]) -> None:
+    async def send_position_open_notification(self, times: str, side: str, strategies: List[HedgeStrategy]) -> None:
         """发送开仓通知 - 使用策略提供的完整信息"""
         if not self.telegram_bot:
             return
@@ -224,7 +224,7 @@ class HedgeMonitor:
         except Exception as e:
             self.logger.error(f"Failed to send position open notification: {e}")
 
-    async def send_position_close_notification(self, times: int, side: str, strategies: List[HedgeStrategy], primary_client=None, lighter_proxy=None) -> None:
+    async def send_position_close_notification(self, times: str, side: str, strategies: List[HedgeStrategy], primary_client=None, lighter_proxy=None) -> None:
         """发送平仓通知 - 使用策略提供的完整信息"""
         if not self.telegram_bot:
             return
