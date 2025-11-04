@@ -312,7 +312,7 @@ class EdgeXClient(BaseExchangeClient):
 
     async def place_open_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
         """Place an open order with EdgeX using official SDK with retry logic for POST_ONLY rejections."""
-        max_retries = 15
+        max_retries = 100
         retry_count = 0
 
         while retry_count < max_retries:
