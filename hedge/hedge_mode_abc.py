@@ -557,7 +557,7 @@ class HedgeBotAbc(ABC):
                             self.logger.error(f"❌ Error canceling {self.primary_exchange_name()} order: {cancel_result.error_message}")
                             # 取消失败时如果订单状态已经是CANCELED或FILLED，则更新状态，理论上不会再出现卡单状态
                             if cancel_result.status in ['CANCELED', 'FILLED']:
-                                if cancel_result.status == 'FILLED' or (cancel_result.status == 'CANCLED' and cancel_result.filled_size > 0):
+                                if cancel_result.status == 'FILLED' or cancel_result.filled_size > 0:
                                     self.logger.info(f"订单已全部或部分成交: {cancel_result.filled_size}, 重置 {self.primary_exchange_name} 订单状态为 FILLED")
                                     self.primary_order_status = 'FILLED'
                                     order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
