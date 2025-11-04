@@ -68,6 +68,14 @@ class HedgeMonitor:
 
         self.hedge_bot_order_handler = hedge_bot_order_handler
         self.hedge_bot_fee_rate_handler = hedge_bot_fee_rate_handler
+        
+        # 累计统计信息
+        self.total_trade_count = 0  # 总交易次数
+        self.total_trade_volume = Decimal('0')  # 总交易量
+        self.total_profit_loss = Decimal('0')  # 总收益
+        self.profit_loss_history = []  # 收益历史记录
+        self.wear_rate_history = []  # 磨损率历史记录
+        self.return_rate_history = []  # 收益率历史记录
 
         self.logger.info("📡 HedgeMonitor 初始化完成")
 
@@ -132,11 +140,36 @@ class HedgeMonitor:
             return
             
         try:
+            # 计算统计信息
+            avg_profit_loss = Decimal('0')
+            avg_return_rate = Decimal('0')
+            avg_wear_rate = Decimal('0')
+            
+            if self.profit_loss_history:
+                avg_profit_loss = sum(self.profit_loss_history) / len(self.profit_loss_history)
+            if self.return_rate_history:
+                avg_return_rate = sum(self.return_rate_history) / len(self.return_rate_history)
+            if self.wear_rate_history:
+                avg_wear_rate = sum(self.wear_rate_history) / len(self.wear_rate_history)
+            
+            # 格式化统计信息
+            stats_msg = ""
+            if self.total_trade_count > 0:
+                stats_msg = f"\n📈 本轮统计信息:\n" \
+                           f"   🔢 总交易次数: {self.total_trade_count}\n" \
+                           f"   💰 总交易量: ${self.total_trade_volume:.2f}\n" \
+                           f"   💯 总收益: ${self.total_profit_loss:.4f}\n" \
+                           f"   📊 平均收益: ${avg_profit_loss:.4f}\n" \
+                           f"   📈 平均收益率: {avg_return_rate:.4f}%\n" \
+                           f"   ⚡ 平均磨损率: {avg_wear_rate:.4f}%"
+            
             shutdown_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
                          f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                          f"🛑 系统停止通知\n" \
                          f"🕐 停止时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
-                         f"📊 持仓状态: Primary={primary_position}, Lighter={lighter_position}"
+                         f"📊 持仓状态: Primary={primary_position}, Lighter={lighter_position}" \
+                         f"{stats_msg}"
+            
             self.telegram_bot.send_text(shutdown_msg)
         except Exception as e:
             self.logger.error(f"Failed to send shutdown notification: {e}")
@@ -263,6 +296,17 @@ class HedgeMonitor:
                 total_pnl = primary_pnl + lighter_pnl
                 total_return_rate = (total_pnl / total_capital * 100) if total_capital > 0 else Decimal('0')
                 wear_rate = total_pnl / total_volume * 100
+            
+            # 累积统计数据
+            self.total_trade_count += 1
+            self.total_trade_volume += total_volume
+            if total_pnl is not None:
+                self.total_profit_loss += total_pnl
+                self.profit_loss_history.append(total_pnl)
+            if total_return_rate is not None:
+                self.return_rate_history.append(total_return_rate)
+            if wear_rate is not None:
+                self.wear_rate_history.append(wear_rate)
             
             # 预先格式化显示值
             lighter_pnl_str = "-" if lighter_pnl is None else f"${lighter_pnl:.4f}"

@@ -26,6 +26,9 @@ class TimingStrategy(HedgeStrategy):
         
         # 内部管理开仓时间
         self.position_open_time = None
+        
+        # 持仓时长历史记录（分钟）
+        self.position_holding_minutes = []
    
     async def can_open(self, hedge_bot):
         """检查是否可以基于时间开仓"""
@@ -107,7 +110,14 @@ class TimingStrategy(HedgeStrategy):
                 except Exception as e:
                     if self.logger:
                         self.logger.warning(f"获取开仓时间信息失败: {e}")
-                    
+            # 添加历史持仓时长统计信息
+            if self.position_holding_minutes:
+                avg_holding = sum(self.position_holding_minutes) / len(self.position_holding_minutes)
+                total_rounds = len(self.position_holding_minutes)
+                msgs.extend([
+                    f"📊 历史持仓统计: 共 {total_rounds} 轮",
+                    f"📊 平均持仓时长: {avg_holding:.1f} 分钟"
+                ])
         return msgs
     
     def can_open_by_time(self) -> bool:
@@ -158,8 +168,18 @@ class TimingStrategy(HedgeStrategy):
 
     def after_close_hedge_position(self, hedge_bot):
         """任何策略平仓后，设置时间策略的下次开仓时间"""
-        # 清除开仓时间记录
-        self.position_open_time = None
-        self.schedule_next_open(*self.open_wait_range)
+        # 记录本次持仓时长
+        if self.position_open_time:
+            try:
+                current_time = time.time()
+                holding_duration = current_time - self.position_open_time
+                holding_minutes = holding_duration / 60
+                
+                # 添加到历史记录
+                self.position_holding_minutes.append(holding_minutes)
+            except Exception as e:
+                if hasattr(self, "logger") and self.logger:
+                    self.logger.warning(f"记录持仓时长失败: {e}")
+        
         if hasattr(self, "logger") and self.logger:
-            self.logger.info(f"⏰ [时间策略] 平仓后统一设置下次开仓时间，清除开仓时间记录")
+            self.logger.info(f"⏰ [时间策略] 平仓后统一设置下次开仓时间")

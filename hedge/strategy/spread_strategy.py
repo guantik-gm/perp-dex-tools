@@ -19,7 +19,7 @@ class SpreadStrategy(HedgeStrategy):
     def __init__(self, priority=10):
         super().__init__(open_priority=priority, close_priority=priority)
         self.current_spread_sample_count = 3  # 当前价差采样次数（默认值）
-        self.profit_threshold = 0.1
+        self.profit_threshold = 0.2
         
         
         # 价差状态
