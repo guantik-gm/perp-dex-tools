@@ -16,12 +16,16 @@ class LiquidRiskStrategy(HedgeStrategy):
         self.risk_exchange = None
         self.risk_liquidation_price = None
         self.open_price = None
-        self.position_side = None  # 'long' 或 'short'
         
         # 缓冲信息属性
         self.current_risk_buffer = None
         self.initial_risk_buffer = None
         self.buffer_consumed_ratio = None
+        
+        self.primary_liquidation_price = None
+        self.lighter_liquidation_price = None
+        self.primary_position_side = None
+        self.lighter_position_side = None
         
     async def can_open(self, hedge_bot):
         """风险策略不主动触发开仓，只做被动检查"""
@@ -52,7 +56,6 @@ class LiquidRiskStrategy(HedgeStrategy):
         risk_exchange_str = self.risk_exchange if self.risk_exchange is not None else "无"
         risk_liquidation_price_str = f"{self.risk_liquidation_price:.6f}" if self.risk_liquidation_price is not None else "无"
         open_price_str = f"{self.open_price:.6f}" if self.open_price is not None else "无"
-        position_side_str = self.position_side if self.position_side is not None else "无"
         
         # 安全地获取 price_data
         price_data = getattr(self, 'data', {}).get('price_data', {})
@@ -64,12 +67,17 @@ class LiquidRiskStrategy(HedgeStrategy):
         initial_buffer_str = f"{self.initial_risk_buffer:.2%}" if self.initial_risk_buffer is not None else "无"
         buffer_consumed_str = f"{self.buffer_consumed_ratio:.2%}" if self.buffer_consumed_ratio is not None else "无"
         
+        primary_liquidation_str = f"{self.primary_liquidation_price:.6f}" if self.primary_liquidation_price is not None else "无"
+        lighter_liquidation_str = f"{self.lighter_liquidation_price:.6f}" if self.lighter_liquidation_price is not None else "无"
+        primary_side_str = self.primary_position_side if self.primary_position_side is not None else "无"
+        lighter_side_str = self.lighter_position_side if self.lighter_position_side is not None else "无"
+        
         return [
-            f"🏦 风险交易所: {risk_exchange_str}",
-            f"📊 持仓方向: {position_side_str}",
+            f"🏦 风险交易所: {risk_exchange_str} === 触发清算价格: {risk_liquidation_price_str}",
             f"📈 开仓价格: {open_price_str}",
             f"📊 当前价格: {current_price_str}",
-            f"💰 清算价格: {risk_liquidation_price_str}", 
+            f"💰 Primary清算价格: {primary_liquidation_str} ({primary_side_str})",
+            f"💰 Lighter清算价格: {lighter_liquidation_str} ({lighter_side_str})",
             f"🔵 当前风险缓冲: {current_buffer_str}",
             f"🟢 初始风险缓冲: {initial_buffer_str}",
             f"🔴 缓冲消耗比例: {buffer_consumed_str}",
@@ -97,6 +105,29 @@ class LiquidRiskStrategy(HedgeStrategy):
             if isinstance(lighter_liquidation, Exception):
                 self.logger.warning(f"⚠️ 获取Lighter清算价格失败: {lighter_liquidation}")
                 lighter_liquidation = None
+            
+            # 记录清算价格到实例属性
+            self.primary_liquidation_price = primary_liquidation
+            self.lighter_liquidation_price = lighter_liquidation
+            
+            # 获取并记录持仓方向
+            primary_position = hedge_bot.get_primary_position()
+            lighter_position = hedge_bot.get_lighter_position()
+            
+            # 根据持仓数量判断持仓方向
+            if primary_position > 0:
+                self.primary_position_side = "long"
+            elif primary_position < 0:
+                self.primary_position_side = "short"
+            else:
+                self.primary_position_side = "无持仓"
+                
+            if lighter_position > 0:
+                self.lighter_position_side = "long"
+            elif lighter_position < 0:
+                self.lighter_position_side = "short"
+            else:
+                self.lighter_position_side = "无持仓"
             
             # 如果都获取失败，则跳过检查
             if primary_liquidation is None and lighter_liquidation is None:
@@ -135,11 +166,6 @@ class LiquidRiskStrategy(HedgeStrategy):
         # 如果有当前开仓价格，使用它；否则尝试获取历史开仓价格
         if order_handler.current_primary_price is not None:
             self.open_price = order_handler.current_primary_price
-            # 根据当前订单方向判断持仓方向
-            if order_handler.current_primary_side == 'buy':
-                self.position_side = 'long'
-            elif order_handler.current_primary_side == 'sell':
-                self.position_side = 'short'
         
         open_price = Decimal(str(self.open_price))
         
