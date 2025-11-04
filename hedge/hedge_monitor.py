@@ -175,8 +175,8 @@ class HedgeMonitor:
             self.lighter_open_quantity = self.get_current_order().current_lighter_quantity
             self.lighter_open_side = lighter_side
             
-            strategy_msgs = [f"----------📋 策略: {strategy.name}---------- \n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
-            strategy_msg = "【触发策略列表】\n" + "\n".join(strategy_msgs)
+            strategy_msgs = [f"【📋 策略: {strategy.name}】\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
+            strategy_msg = "\n触发策略列表\n" + "\n".join(strategy_msgs)
             
             # 构建基础通知模板
             open_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式 - 【开仓执行通知】\n" \
@@ -278,8 +278,8 @@ class HedgeMonitor:
             if abs(current_primary_position) > Decimal('0') or abs(current_lighter_position) > Decimal('0'):
                 position_warning = "\n🚨 警告：平仓后持仓非零，请手动检查！"
             
-            strategy_msgs = [f"----------📋 策略: {strategy.name}---------- \n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
-            strategy_msg = "【触发策略列表】\n" + "\n".join(strategy_msgs)
+            strategy_msgs = [f"【📋 策略: {strategy.name}】\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
+            strategy_msg = "\n触发策略列表\n" + "\n".join(strategy_msgs)
             
             close_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式 - 【平仓执行通知】\n" \
                       f"━━━━━━━━━━━━━━━━━━━━━━\n" \

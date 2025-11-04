@@ -258,19 +258,19 @@ class SpreadStrategy(HedgeStrategy):
             
             # 显示预计和实际平仓价差
             predict_spread_msg = ""
-            if self.close_spread is not None:
-                predict_spread_msg += f"📉 预计平仓价差: {self.close_spread:.6f}"
             if self.open_spread is not None:
-                predict_spread_msg += f" - 预计开仓价差: {self.open_spread:.6f}"
+                predict_spread_msg += f"📉 预计开仓价差: {self.open_spread:.6f}"
+            if self.close_spread is not None:
+                predict_spread_msg += f" == 预计平仓价差: {self.close_spread:.6f}"
             base_msg.append(predict_spread_msg)
                 
             actual_spread_msg = ""
-            if self.actual_close_spread is not None:
-                actual_spread_msg += f"💰 实际平仓价差: {self.actual_close_spread:.6f}"
-            else:
-                actual_spread_msg += "💰 实际平仓价差: 待更新"
             if self.actual_open_spread is not None:
-                actual_spread_msg += " - 实际开仓价差: {self.actual_open_spread:.6f}"
+                actual_spread_msg += f"💰 实际开仓价差: {self.actual_open_spread:.6f}"
+            if self.actual_close_spread is not None:
+                actual_spread_msg += f" == 实际平仓价差: {self.actual_close_spread:.6f}"
+            else:
+                actual_spread_msg += " == 实际平仓价差: 待更新"
             base_msg.append(actual_spread_msg)
             
             spread_diff_msg = ""
