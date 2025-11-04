@@ -766,18 +766,16 @@ class LighterProxy:
         return Decimal(position.liquidation_price)
     
     async def get_ticker_position_pnl(self) -> Decimal:
-        """获取指定合约的强平价"""
         position = await self.get_ticker_position()
         if position is None:
-            raise ValueError("No position found for liquidation price calculation")
+            raise ValueError("No position found for position PnL")
         # unrealized_pnl, realized_pnl
         return Decimal(position.realized_pnl)
     
     async def get_ticker_position_value(self) -> Decimal:
-        """获取指定合约的强平价"""
         position = await self.get_ticker_position()
         if position is None:
-            raise ValueError("No position found for liquidation price calculation")
+            raise ValueError("No position found for position value")
         # unrealized_pnl, realized_pnl
         return Decimal(position.position_value)
         

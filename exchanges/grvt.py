@@ -768,3 +768,39 @@ class GrvtClient(BaseExchangeClient):
         except Exception as e:
             self.logger.log(f"Error placing IOC order: {e}", "ERROR")
             return OrderResult(success=False, error_message=str(e))
+
+    @query_retry(default_return=0)
+    async def get_ticker_position(self) -> Decimal:
+        """Get account positions using official SDK."""
+        # 接口文档地址: https://api-docs.grvt.io/trading_api/#positions-response
+        position = None
+        positions = self.rest_client.fetch_positions()
+        if not positions:
+            self.logger.log("No positions or failed to get positions", "WARNING")
+        else:
+            for p in positions:
+                if isinstance(p, dict) and p.get('instrument') == self.config.contract_id:
+                    position = p
+                    break
+        return position
+
+    async def get_ticker_position_liquidation_price(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        return Decimal(position["est_liquidation_price"])
+    
+    async def get_ticker_position_pnl(self) -> Decimal:
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for position PnL")
+        # unrealizePnl, termRealizePnl
+        return Decimal(position["total_pnl"])
+    
+    async def get_ticker_position_value(self) -> Decimal:
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for position value")
+        # unrealizePnl, termRealizePnl
+        return Decimal(position["size"])

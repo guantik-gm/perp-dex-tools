@@ -615,18 +615,16 @@ class EdgeXClient(BaseExchangeClient):
         return Decimal(position["liquidatePrice"])
     
     async def get_ticker_position_pnl(self) -> Decimal:
-        """获取指定合约的强平价"""
         position = await self.get_ticker_position()
         if position is None:
-            raise ValueError("No position found for liquidation price calculation")
+            raise ValueError("No position found for position PnL")
         # unrealizePnl, termRealizePnl
         return Decimal(position["totalRealizePnl"])
     
     async def get_ticker_position_value(self) -> Decimal:
-        """获取指定合约的强平价"""
         position = await self.get_ticker_position()
         if position is None:
-            raise ValueError("No position found for liquidation price calculation")
+            raise ValueError("No position found for position value")
         # unrealizePnl, termRealizePnl
         return Decimal(position["positionValue"])
     
