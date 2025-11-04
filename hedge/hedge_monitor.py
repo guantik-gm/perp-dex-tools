@@ -157,7 +157,7 @@ class HedgeMonitor:
         except Exception as notify_error:
             self.logger.error(f"Failed to send error notification: {notify_error}")
 
-    async def send_position_open_notification(self, side: str, strategies: List[HedgeStrategy]) -> None:
+    async def send_position_open_notification(self, times: int, side: str, strategies: List[HedgeStrategy]) -> None:
         """发送开仓通知 - 使用策略提供的完整信息"""
         if not self.telegram_bot:
             return
@@ -179,7 +179,7 @@ class HedgeMonitor:
             strategy_msg = "\n触发策略列表\n" + "\n".join(strategy_msgs)
             
             # 构建基础通知模板
-            open_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式 - 【开仓执行通知】\n" \
+            open_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 对冲模式第【{times}】次 - 【开仓执行通知】\n" \
                      f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                      f"🕐 开仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
                      f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 成交价: ${self.primary_open_price:.6f}\n" \
@@ -191,7 +191,7 @@ class HedgeMonitor:
         except Exception as e:
             self.logger.error(f"Failed to send position open notification: {e}")
 
-    async def send_position_close_notification(self, side: str, strategies: List[HedgeStrategy], primary_client=None, lighter_proxy=None) -> None:
+    async def send_position_close_notification(self, times: int, side: str, strategies: List[HedgeStrategy], primary_client=None, lighter_proxy=None) -> None:
         """发送平仓通知 - 使用策略提供的完整信息"""
         if not self.telegram_bot:
             return
@@ -281,7 +281,7 @@ class HedgeMonitor:
             strategy_msgs = [f"【📋 策略: {strategy.name}】\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
             strategy_msg = "\n触发策略列表\n" + "\n".join(strategy_msgs)
             
-            close_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式 - 【平仓执行通知】\n" \
+            close_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 对冲模式第【{times}】次 - 【平仓执行通知】\n" \
                       f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                       f"🕐 平仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
                      f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 成交价: ${self.primary_open_price:.6f}\n" \

@@ -277,7 +277,7 @@ class SpreadStrategy(HedgeStrategy):
             if self.actual_close_spread is not None and self.actual_open_spread is not None:
                 spread_profit = abs(self.actual_open_spread - self.actual_close_spread)
                 spread_predict = abs(self.open_spread - self.close_spread)
-                spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} - 实际开平仓价差: {spread_profit:.6f}"
+                spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} == 实际开平仓价差: {spread_profit:.6f}"
             base_msg.append(spread_diff_msg)
             
             # 添加基准信息

@@ -23,6 +23,9 @@ class TimingStrategy(HedgeStrategy):
         self.close_decision_start_time = time.time()
         
         self.logger = None
+        
+        # 内部管理开仓时间
+        self.position_open_time = None
    
     async def can_open(self, hedge_bot):
         """检查是否可以基于时间开仓"""
@@ -89,6 +92,22 @@ class TimingStrategy(HedgeStrategy):
                 f"📅 下次开仓: {self._format_time(self.next_open_time)}",
                 f"📅 开仓时间周期: {self.open_wait_range[0]} - {self.open_wait_range[1]} 分钟",
             ]
+            
+            # 添加本次开仓时间和持仓时长信息（仅在平仓时显示）
+            if self.position_open_time:
+                try:
+                    current_time = time.time()
+                    holding_duration = current_time - self.position_open_time
+                    holding_minutes = holding_duration / 60
+                    
+                    msgs.extend([
+                        f"📅 本次开仓时间: {self._format_time(self.position_open_time)}",
+                        f"⏱️ 本次持仓时长: {holding_minutes:.1f} 分钟"
+                    ])
+                except Exception as e:
+                    if self.logger:
+                        self.logger.warning(f"获取开仓时间信息失败: {e}")
+                    
         return msgs
     
     def can_open_by_time(self) -> bool:
@@ -131,12 +150,16 @@ class TimingStrategy(HedgeStrategy):
         
     def after_open_hedge_position(self, hedge_bot):
         """任何策略开仓后，设置时间策略的平仓时间"""
+        # 记录开仓时间
+        self.position_open_time = time.time()
         self.schedule_next_close(*self.close_wait_range)
         if hasattr(self, "logger") and self.logger:
-            self.logger.info(f"⏰ [时间策略] 开仓后统一设置平仓时间")
+            self.logger.info(f"⏰ [时间策略] 开仓后统一设置平仓时间，记录开仓时间: {self._format_time(self.position_open_time)}")
 
     def after_close_hedge_position(self, hedge_bot):
         """任何策略平仓后，设置时间策略的下次开仓时间"""
+        # 清除开仓时间记录
+        self.position_open_time = None
         self.schedule_next_open(*self.open_wait_range)
         if hasattr(self, "logger") and self.logger:
-            self.logger.info(f"⏰ [时间策略] 平仓后统一设置下次开仓时间")
+            self.logger.info(f"⏰ [时间策略] 平仓后统一设置下次开仓时间，清除开仓时间记录")

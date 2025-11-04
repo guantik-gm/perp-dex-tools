@@ -762,7 +762,7 @@ class HedgeBotAbc(ABC):
             try:
                 if triggered_open_strategies:
                     # 传递触发的策略给monitor
-                    await self.monitor.send_position_open_notification(open_side, triggered_open_strategies)
+                    await self.monitor.send_position_open_notification(iterations, open_side, triggered_open_strategies)
                     
                     # 启动状态监控任务
                     self.monitor.start_status_monitor(
@@ -823,6 +823,7 @@ class HedgeBotAbc(ABC):
                 if triggered_close_strategies:
                     # 传递触发的策略给monitor
                     await self.monitor.send_position_close_notification(
+                        iterations,
                         close_side,
                         triggered_close_strategies,
                         primary_client=self.primary_client, 
