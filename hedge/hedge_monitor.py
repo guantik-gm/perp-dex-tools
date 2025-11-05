@@ -123,7 +123,7 @@ class HedgeMonitor:
             return
             
         try:
-            startup_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+            startup_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式\n" \
                         f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                         f"📡 系统启动通知\n" \
                         f"🕐 启动时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
@@ -163,7 +163,7 @@ class HedgeMonitor:
                            f"   📈 平均收益率: {avg_return_rate:.4f}%\n" \
                            f"   ⚡ 平均磨损率: {avg_wear_rate:.4f}%"
             
-            shutdown_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+            shutdown_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式\n" \
                          f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                          f"🛑 系统停止通知\n" \
                          f"🕐 停止时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
@@ -180,7 +180,7 @@ class HedgeMonitor:
             return
             
         try:
-            error_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+            error_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式\n" \
                      f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                      f"❌ 系统异常报告\n" \
                      f"🕐 异常时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
@@ -215,8 +215,8 @@ class HedgeMonitor:
             open_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 对冲模式第【{times}】次 - 【开仓执行通知】\n" \
                      f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                      f"🕐 开仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
-                     f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 成交价: ${self.primary_open_price:.6f}\n" \
-                     f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantity}, 成交价: ${self.lighter_open_price:.6f}\n" \
+                     f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 开仓价格: ${self.primary_open_price:.6f}\n" \
+                     f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantity}, 开仓价格: ${self.lighter_open_price:.6f}\n" \
                      f"{strategy_msg}"
             
             self.telegram_bot.send_text(open_msg)
@@ -328,9 +328,9 @@ class HedgeMonitor:
             close_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 对冲模式第【{times}】次 - 【平仓执行通知】\n" \
                       f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                       f"🕐 平仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
-                     f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 成交价: ${self.primary_open_price:.6f}\n" \
+                     f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 开仓价格: ${self.primary_open_price:.6f}\n" \
                       f"🏭 {self.primary_exchange_name} 平仓方向: {self.primary_close_side.upper()}, 平仓数量: {self.primary_close_quantity}, 平仓价格: ${self.primary_close_price:.6f}\n" \
-                     f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantity}, 成交价: ${self.lighter_open_price:.6f}\n" \
+                     f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantity}, 开仓价格: ${self.lighter_open_price:.6f}\n" \
                       f"💡 Lighter 平仓方向: {self.lighter_close_side.upper()}, 平仓数量: {self.lighter_close_quantity}, 平仓价格: ${self.lighter_close_price:.6f}\n" \
                       f"📊 双边收益明细:\n" \
                       f"   🏭 {self.primary_exchange_name} 开仓手续费: ${primary_open_fee:.4f}, 平仓手续费: ${primary_close_fee:.4f}, 总手续费: ${primary_open_fee + primary_close_fee:.4f}\n" \
@@ -375,7 +375,7 @@ class HedgeMonitor:
                 # 检查是否已经开仓
                 if self.primary_open_price is None or self.lighter_open_price is None:
                     # 未开仓状态的通知
-                    status_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                    status_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式\n" \
                                f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                                f"📊 持仓状态报告\n" \
                                f"🕐 报告时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
@@ -396,7 +396,7 @@ class HedgeMonitor:
                     
                     total_pnl = primary_pnl + lighter_pnl
                     
-                    status_msg = f"🔄 [{self.primary_exchange_name}_{self.ticker}] 智能对冲模式\n" \
+                    status_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 智能对冲模式\n" \
                                f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                                f"📊 持仓状态报告\n" \
                                f"🕐 报告时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \

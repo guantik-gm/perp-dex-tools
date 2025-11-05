@@ -35,8 +35,12 @@ class SpreadStrategy(HedgeStrategy):
         self.lighter_open_price = None
         self.primary_close_price = None
         self.lighter_close_price = None
-        
-        
+       
+        # 采样过程中的双边预计成交价 
+        self.primary_open_exec_price = None 
+        self.lighter_open_exec_price = None
+        self.primary_close_exec_price = None 
+        self.lighter_close_exec_price = None
         self.logger = None
     
     async def can_open(self, hedge_bot):
@@ -146,12 +150,16 @@ class SpreadStrategy(HedgeStrategy):
                             # Lighter taker卖单价格（基于订单簿深度）
                             lighter_exec_price = hedge_bot.lighter.calculate_execution_price('sell', trade_quantity)
                             trade_type = "价差收敛开仓"
+                            self.primary_open_exec_price = primary_exec_price
+                            self.lighter_open_exec_price = lighter_exec_price
                         else:  # 平仓：Primary卖出，Lighter买入
                             # Primary maker卖单价格
                             primary_exec_price = primary_bid + hedge_bot.primary_tick_size
                             # Lighter taker买单价格（基于订单簿深度）
                             lighter_exec_price = hedge_bot.lighter.calculate_execution_price('buy', trade_quantity)
                             trade_type = "价差收敛平仓"
+                            self.primary_close_exec_price = primary_exec_price
+                            self.lighter_close_exec_price = lighter_exec_price
                     else:
                         # 情况2：Primary更贵 → 传统套利策略（做多价差）
                         if not is_closing:  # 开仓：Primary卖出，Lighter买入
@@ -160,13 +168,18 @@ class SpreadStrategy(HedgeStrategy):
                             # Lighter taker买单价格（基于订单簿深度）
                             lighter_exec_price = hedge_bot.lighter.calculate_execution_price('buy', trade_quantity)
                             trade_type = "价格倒挂开仓"
+                            self.primary_open_exec_price = primary_exec_price
+                            self.lighter_open_exec_price = lighter_exec_price
                         else:  # 平仓：Primary买入，Lighter卖出
                             # Primary maker买单价格
                             primary_exec_price = primary_ask - hedge_bot.primary_tick_size
                             # Lighter taker卖单价格（基于订单簿深度）
                             lighter_exec_price = hedge_bot.lighter.calculate_execution_price('sell', trade_quantity)
                             trade_type = "价格倒挂平仓"
-                    
+                            self.primary_close_exec_price = primary_exec_price
+                            self.lighter_close_exec_price = lighter_exec_price
+                   
+
                     # 计算执行价差（总是正值，表示可获得的盈利）
                     raw_spread = abs(primary_exec_price - lighter_exec_price)
                     
@@ -225,6 +238,8 @@ class SpreadStrategy(HedgeStrategy):
         if self.data['side'] == 'open':
             base_msg = [
                 f"📊 价差策略: 价差大于阈值开仓"
+                f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {abs(self.primary_open_exec_price - self.primary_open_price)}",
+                f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {abs(self.lighter_open_exec_price - self.lighter_open_price)}",
             ]
             
             # 显示预计和实际开仓价差
@@ -255,30 +270,34 @@ class SpreadStrategy(HedgeStrategy):
         else:  # close
             base_msg = [
                 f"📊 价差策略: 价差收敛触发平仓"
+                f"[Primary] 预计开仓价: {self.primary_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {abs(self.primary_open_exec_price - self.primary_open_price)}",
+                f"[Primary] 预计平仓价: {self.primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {abs(self.primary_close_exec_price - self.primary_close_price)}",
+                f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {abs(self.lighter_open_exec_price - self.lighter_open_price)}",
+                f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {abs(self.lighter_close_exec_price - self.lighter_close_price)}",
             ]
             
             # 显示预计和实际平仓价差
             predict_spread_msg = ""
             if self.open_spread is not None:
                 predict_spread_msg += f"📉 预计开仓价差: {self.open_spread:.6f}"
-            if self.close_spread is not None:
-                predict_spread_msg += f" == 预计平仓价差: {self.close_spread:.6f}"
+            if self.actual_open_spread is not None:
+                predict_spread_msg += f" 💰 实际开仓价差: {self.actual_open_spread:.6f}"
             base_msg.append(predict_spread_msg)
                 
             actual_spread_msg = ""
-            if self.actual_open_spread is not None:
-                actual_spread_msg += f"💰 实际开仓价差: {self.actual_open_spread:.6f}"
+            if self.close_spread is not None:
+                actual_spread_msg += f"📉 预计平仓价差: {self.close_spread:.6f}"
             if self.actual_close_spread is not None:
-                actual_spread_msg += f" == 实际平仓价差: {self.actual_close_spread:.6f}"
+                actual_spread_msg += f" 💰 实际平仓价差: {self.actual_close_spread:.6f}"
             else:
-                actual_spread_msg += " == 实际平仓价差: 待更新"
+                actual_spread_msg += " 💰 实际平仓价差: 待更新"
             base_msg.append(actual_spread_msg)
             
             spread_diff_msg = ""
             if self.actual_close_spread is not None and self.actual_open_spread is not None:
                 spread_profit = abs(self.actual_open_spread - self.actual_close_spread)
                 spread_predict = abs(self.open_spread - self.close_spread)
-                spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} == 实际开平仓价差: {spread_profit:.6f}"
+                spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} 💰 实际开平仓价差: {spread_profit:.6f}"
             base_msg.append(spread_diff_msg)
             
             # 添加基准信息
