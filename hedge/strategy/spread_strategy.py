@@ -19,7 +19,7 @@ class SpreadStrategy(HedgeStrategy):
     def __init__(self, priority=10):
         super().__init__(open_priority=priority, close_priority=priority)
         self.current_spread_sample_count = 10  # 当前价差采样次数（默认值）
-        self.profit_threshold = 0.01
+        self.profit_threshold = 0.05
         
         
         # 价差状态
@@ -60,15 +60,17 @@ class SpreadStrategy(HedgeStrategy):
             self.current_spread = current_spread
             
             # 3. 价差判断
-            threshold_value = float(baseline_spread) * (1 + self.profit_threshold)
+            # threshold_value = float(baseline_spread) * (1 + self.profit_threshold)
             
             # 检查价差条件
-            reason = f"[价差策略] 未触发, 当前价差: {current_spread:.6f}, 开仓价差基准: {threshold_value:.6f}, 盈利阈值: {self.profit_threshold:.1%}"
+            # reason = f"[价差策略] 未触发, 当前价差: {current_spread:.6f}, 开仓价差基准: {threshold_value:.6f}, 盈利阈值: {self.profit_threshold:.1%}"
+            reason = f"[价差策略] 未触发, 当前价差: {current_spread:.6f}, 开仓价差基准: {baseline_spread:.6f}"
             strategy_result = HedgeStrategyResult.REJECT
             
-            if float(current_spread) > threshold_value:
+            if float(current_spread) > baseline_spread:
                 self.open_spread = current_spread  # 记录预计开仓价差
-                reason = f"✅ 当前价差满足开仓条件：{current_spread:.6f} 大于 {threshold_value:.6f} (基准×{1+self.profit_threshold:.3f})"
+                # reason = f"✅ 当前价差满足开仓条件：{current_spread:.6f} 大于 {threshold_value:.6f} (基准×{1+self.profit_threshold:.3f})"
+                reason = f"✅ 当前价差满足开仓条件：{current_spread:.6f} 大于 {baseline_spread:.6f}"
                 strategy_result = HedgeStrategyResult.PASS
                 
             self._set_strategy_context(strategy_result, reason)

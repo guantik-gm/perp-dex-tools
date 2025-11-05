@@ -741,7 +741,7 @@ class HedgeBotAbc(ABC):
             success = False
             for retry_count in range(max_retries):
                 if self.stop_flag:
-                    self.logger.info("收到退出信号，退出开仓流程")
+                    self.logger.warning("收到退出信号，退出开仓流程")
                     break
                 
                 success, need_retry_strategy = await self._execute_hedge_position(open_side, self.order_quantity, triggered_open_strategies)
@@ -801,7 +801,7 @@ class HedgeBotAbc(ABC):
             success = False
             for retry_count in range(max_retries):
                 if self.stop_flag:
-                    self.logger.info("收到退出信号，退出平仓流程")
+                    self.logger.warning("收到退出信号，退出平仓流程")
                     break
                 
                 success, need_retry_strategy = await self._execute_hedge_position(close_side, self.order_quantity, triggered_close_strategies)
