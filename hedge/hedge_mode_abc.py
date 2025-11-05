@@ -746,7 +746,7 @@ class HedgeBotAbc(ABC):
             triggered_open_strategies = await self.wait_open()
             if triggered_open_strategies:
                 change_side_strategies = [strategy for strategy in triggered_open_strategies if hasattr(strategy, "open_side") and strategy.open_side is not None]
-                open_side = triggered_open_strategies[0].open_side if len(change_side_strategies) > 0 else open_side
+                open_side = change_side_strategies[0].open_side if len(change_side_strategies) > 0 else open_side
             else:
                 self.logger.warning("⚠️ 没有策略触发开仓，使用默认方向")
             
@@ -768,7 +768,7 @@ class HedgeBotAbc(ABC):
                     triggered_open_strategies = await self.wait_open()
                     if triggered_open_strategies:
                         change_side_strategies = [strategy for strategy in triggered_open_strategies if hasattr(strategy, "open_side") and strategy.open_side is not None]
-                        open_side = triggered_open_strategies[0].open_side if len(change_side_strategies) > 0 else open_side
+                        open_side = change_side_strategies[0].open_side if len(change_side_strategies) > 0 else open_side
                     else:
                         self.logger.warning("⚠️ 重试时没有策略触发开仓")
                         break
