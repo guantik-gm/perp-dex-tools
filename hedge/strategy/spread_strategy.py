@@ -18,7 +18,7 @@ class SpreadStrategy(HedgeStrategy):
     
     def __init__(self, priority=10):
         super().__init__(open_priority=priority, close_priority=priority)
-        self.current_spread_sample_count = 3  # 当前价差采样次数（默认值）
+        self.current_spread_sample_count = 10  # 当前价差采样次数（默认值）
         self.profit_threshold = 0.2
         
         
@@ -47,11 +47,11 @@ class SpreadStrategy(HedgeStrategy):
             self.logger.info("🎯 计算基准价差和当前价差")
             
             # 1. 多次采样获得基准价差（预计价差）
-            baseline_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=10)
+            baseline_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=self.current_spread_sample_count)
             self.average_spread = baseline_spread  # 更新基准价差
             
             # 2. 单次计算获得当前价差
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=1)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=3, max=False)
             self.current_spread = current_spread
             
             # 3. 价差判断
@@ -77,7 +77,7 @@ class SpreadStrategy(HedgeStrategy):
         self.data['side'] = 'close'
         try:
             # 获取当前真实执行价差
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=1)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=3, max=False)
             self.current_spread = current_spread
             self.close_spread = current_spread  # 记录预计平仓价差
             
@@ -113,7 +113,7 @@ class SpreadStrategy(HedgeStrategy):
         except Exception as e:
             self._set_strategy_context(result=HedgeStrategyResult.PASS, reason=f"❌ 价差策略平仓检查失败: {e}")
     
-    async def get_realistic_executable_spread(self, hedge_bot, is_closing=False, sample_count=None):
+    async def get_realistic_executable_spread(self, hedge_bot, is_closing=False, sample_count=10, max=True):
         """计算真实可执行价差 - 自适应价差收敛与价格倒挂套利
         
         Args:
@@ -122,10 +122,6 @@ class SpreadStrategy(HedgeStrategy):
             sample_count: 采样次数，None时使用默认值
         """
         try:
-            # 采样次数控制
-            if sample_count is None:
-                sample_count = self.current_spread_sample_count
-                
             # 多次采样获取稳定的执行价差
             spreads = []
             trade_directions = []  # 记录每次采样的交易方向
@@ -203,7 +199,12 @@ class SpreadStrategy(HedgeStrategy):
                 raise Exception("所有价差采样都失败了")
             
             # 取中位数作为稳定价差
-            stable_spread = statistics.median(spreads)
+            # stable_spread = statistics.median(spreads)
+            # 取最大价差进行安全比较
+            if max:
+                stable_spread = max(spreads)
+            else:
+                stable_spread = min(spreads)
             
             # 统计交易方向分布
             direction_counts = {}
@@ -286,36 +287,6 @@ class SpreadStrategy(HedgeStrategy):
             ])
             
         return base_msg
-    
-    # 价差采样方法
-    async def get_stable_current_spread(self, hedge_bot):
-        """简单获取稳定当前价差：2-3次采样取中位数"""
-        spreads = []
-        for i in range(self.current_spread_sample_count):
-            try:
-                sample = await self._get_current_price_data(hedge_bot)
-                if sample and 'spread' in sample:
-                    spreads.append(sample['spread'])
-                    if self.logger:
-                        self.logger.info(f"📊 当前价差采样 {i+1}/{self.current_spread_sample_count}: {sample['spread']:.6f}")
-                
-                if i < self.current_spread_sample_count - 1:
-                    await asyncio.sleep(0.5)
-                    
-            except Exception as e:
-                if self.logger:
-                    self.logger.error(f"❌ 当前价差采样失败 {i+1}: {e}")
-                continue
-        
-        if not spreads:
-            raise Exception("无法获取稳定的当前价差")
-        
-        stable_spread = statistics.median(spreads)
-        if self.logger:
-            self.logger.info(f"✅ 稳定当前价差: {stable_spread:.6f} (基于{len(spreads)}个样本)")
-        return stable_spread
-
-    
     
     def after_open_hedge_position(self, hedge_bot):
         # 如果开仓策略不是价差，那么这里的值会是空的，can_close将会回退到传统价差判断的方式

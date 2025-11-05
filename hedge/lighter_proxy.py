@@ -558,8 +558,8 @@ class LighterProxy:
                                 self.logger.warning(f"⏰ No message from Lighter websocket for {timeout_count}s, "
                                                    f"order book数据已{data_age:.1f}s未更新")
                             
-                            # 数据超过30秒未更新时主动重连
-                            if data_age >= 60:
+                            # 数据超过10秒未更新时主动重连
+                            if data_age >= 3:
                                 self.logger.warning(f"🔄 Order book数据过时({data_age:.1f}s)，主动重连以刷新数据")
                                 self.lighter_order_book_ready = False
                                 break  # 跳出内层循环，触发重连

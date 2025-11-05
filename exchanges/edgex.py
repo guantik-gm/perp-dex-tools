@@ -315,6 +315,10 @@ class EdgeXClient(BaseExchangeClient):
         max_retries = 100
         retry_count = 0
 
+        last_oredr_id = None
+        last_order_price = None
+        # current for BTC
+        order_price_diff_rate = 0.0001
         while retry_count < max_retries:
             try:
                 best_bid, best_ask = await self.fetch_bbo_prices(contract_id)
@@ -331,6 +335,11 @@ class EdgeXClient(BaseExchangeClient):
                     order_price = best_bid + self.config.tick_size
                     side = OrderSide.SELL
 
+                if last_order_price is not None and abs(self.round_to_tick(order_price) - last_order_price) / last_order_price > order_price_diff_rate:
+                    msg = f"Current retry order price has more than {order_price_diff_rate} diff with last order price cancel order execute, last order {last_order_id} status should be [CANCELED]"
+                    self.logger.log(msg, "INFO")
+                    return OrderResult(success=True, order_id=last_order_id, order_price=last_order_price)
+                    
                 self.logger.log(f"Placing open order: side={side.value}, size={quantity}, price={self.round_to_tick(order_price)}", "INFO")
 
                 # Place the order using official SDK (post-only to ensure maker order)
@@ -341,7 +350,6 @@ class EdgeXClient(BaseExchangeClient):
                     side=side,
                     post_only=True
                 )
-                
                 self.logger.log(f"Order placement result: {order_result}", "INFO")
                 
                 if not order_result or 'data' not in order_result:
@@ -356,6 +364,9 @@ class EdgeXClient(BaseExchangeClient):
                 await asyncio.sleep(0.05)
                 order_info = await self.get_order_info(order_id)
                 self.logger.log(f"Order info after placement: {order_info}", "INFO")
+                
+                last_order_id = order_id
+                last_order_price = self.round_to_tick(order_price)
 
                 if order_info:
                     if order_info.status == 'CANCELED':

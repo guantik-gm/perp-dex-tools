@@ -505,7 +505,8 @@ class HedgeBotAbc(ABC):
             if current_time - last_log_time >= log_interval:
                 self.logger.info(f"⏳ Waiting for order fill - Status: {self.primary_order_status}, Elapsed: {elapsed_time:.1f}s")
                 last_log_time = current_time
-            
+           
+            # POST-ONLY的价差过大取消、当前非最优价格取消
             if self.primary_order_status == 'CANCELED':
                 self.logger.info(f"🔄 Order was canceled, placing new order")
                 
@@ -576,6 +577,7 @@ class HedgeBotAbc(ABC):
                             # 取消成功，需要重新进行策略判断
                             # 取消成功的场景下，有可能时间差的原因，ws又返回了FILLED的状态，实际已经成交，这种情况下需要返回开仓成功
                             if self.primary_order_status == "FILLED":
+                                self.handle_primary_order_update(order_data)
                                 return HedgeOrderResult.SUCCESS
                             # should_cancel说明当前primary下单价格将会改变，重新计算策略条件（比如价差策略）
                             if triggered_strategies_need_to_replace_order or should_cancel:
@@ -587,21 +589,25 @@ class HedgeBotAbc(ABC):
                                 self.primary_order_status = cancel_result.status
             elif self.primary_order_status == 'FILLED':
                 self.logger.info(f"✅ Order {order_id} filled successfully after {elapsed_time:.1f}s")
-                # 重置卡单计数器和告警标志，因为订单已成功填充
+                # 返回成功的情况下必须调用handle_primary_order_update通知lighter下单
+                self.handle_primary_order_update(order_data)
                 return HedgeOrderResult.SUCCESS
             else:
                 if self.primary_order_status is not None:
                     self.logger.error(f"❌ Unknown {self.primary_exchange_name()} order status: {self.primary_order_status}")
                     return HedgeOrderResult.FAILED
                 else:
-                    # primary order status 为None的情况，可能是ws没有及时更新，这里可以尝试fetch一下状态
+                    # primary order status 为None的情况，可能是ws没有及时更新
+                    # 或者client中place_open_order的POST-ONLY单子价差过大直接取消
+                    # 这里可以尝试fetch一下状态
                     self.logger.info(f"⏳ No order status update yet, order status is: {self.primary_order_status}, websocket stream didnt update, try to fetch order status through REST API")
                     order_info = await self.primary_client.get_order_info(order_id)
                     if order_info is not None:
                         order_data = {'side': order_info.side, 'price': Decimal(order_info.price), 'filled_size': Decimal(order_info.filled_size)}
                         self.logger.info(f"get order info from REST API: {order_info}")
                         self.primary_order_status = order_info.status
-                        self.handle_primary_order_update(order_data)
+                        # 这里的状态有很多中，不需要再设置一次，下轮循环处理自动根据状态处理
+                        # self.handle_primary_order_update(order_data)
                     else:
                         self.logger.info(f"Still cannt fetch order info from REST API, continue to wait...")
                     await asyncio.sleep(0.5)
