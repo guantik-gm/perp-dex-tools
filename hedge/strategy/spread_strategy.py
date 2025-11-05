@@ -55,6 +55,7 @@ class SpreadStrategy(HedgeStrategy):
             self.average_spread = baseline_spread  # 更新基准价差
             
             # 2. 单次计算获得当前价差
+            await asyncio.sleep(0.5)
             current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=1, use_max=False)
             self.current_spread = current_spread
             
@@ -62,7 +63,7 @@ class SpreadStrategy(HedgeStrategy):
             threshold_value = float(baseline_spread) * (1 + self.profit_threshold)
             
             # 检查价差条件
-            reason = f"[价差策略] 未触发, 当前价差: {current_spread:.6f}, 基准价差: {baseline_spread:.6f}, 盈利阈值: {self.profit_threshold:.1%}"
+            reason = f"[价差策略] 未触发, 当前价差: {current_spread:.6f}, 开仓价差基准: {threshold_value:.6f}, 盈利阈值: {self.profit_threshold:.1%}"
             strategy_result = HedgeStrategyResult.REJECT
             
             if float(current_spread) > threshold_value:
