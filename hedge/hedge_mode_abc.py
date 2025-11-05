@@ -739,7 +739,11 @@ class HedgeBotAbc(ABC):
             # Step 1: 开仓（添加重试逻辑）
             max_retries = 1000
             success = False
-            for retry_count in range(max_retries) and not self.stop_flag:
+            for retry_count in range(max_retries):
+                if not self.stop_flag:
+                    self.logger.info("收到退出信号，退出开仓流程")
+                    break
+                
                 success, need_retry_strategy = await self._execute_hedge_position(open_side, self.order_quantity, triggered_open_strategies)
                 
                 if success:
@@ -795,7 +799,11 @@ class HedgeBotAbc(ABC):
             # Step 2: 第一次平仓（添加重试逻辑）
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             success = False
-            for retry_count in range(max_retries) and not self.stop_flag:
+            for retry_count in range(max_retries):
+                if not self.stop_flag:
+                    self.logger.info("收到退出信号，退出平仓流程")
+                    break
+                
                 success, need_retry_strategy = await self._execute_hedge_position(close_side, self.order_quantity, triggered_close_strategies)
                 
                 if success:
