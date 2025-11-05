@@ -740,7 +740,7 @@ class HedgeBotAbc(ABC):
             max_retries = 1000
             success = False
             for retry_count in range(max_retries):
-                if not self.stop_flag:
+                if self.stop_flag:
                     self.logger.info("收到退出信号，退出开仓流程")
                     break
                 
@@ -800,7 +800,7 @@ class HedgeBotAbc(ABC):
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             success = False
             for retry_count in range(max_retries):
-                if not self.stop_flag:
+                if self.stop_flag:
                     self.logger.info("收到退出信号，退出平仓流程")
                     break
                 
