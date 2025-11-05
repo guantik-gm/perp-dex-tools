@@ -55,7 +55,7 @@ class SpreadStrategy(HedgeStrategy):
             self.average_spread = baseline_spread  # 更新基准价差
             
             # 2. 单次计算获得当前价差
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=3, max=False)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=3, use_max=False)
             self.current_spread = current_spread
             
             # 3. 价差判断
@@ -81,7 +81,7 @@ class SpreadStrategy(HedgeStrategy):
         self.data['side'] = 'close'
         try:
             # 获取当前真实执行价差
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=3, max=False)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=3, use_max=False)
             self.current_spread = current_spread
             self.close_spread = current_spread  # 记录预计平仓价差
             
@@ -117,7 +117,7 @@ class SpreadStrategy(HedgeStrategy):
         except Exception as e:
             self._set_strategy_context(result=HedgeStrategyResult.PASS, reason=f"❌ 价差策略平仓检查失败: {e}")
     
-    async def get_realistic_executable_spread(self, hedge_bot, is_closing=False, sample_count=10, max=True):
+    async def get_realistic_executable_spread(self, hedge_bot, is_closing=False, sample_count=10, use_max=True):
         """计算真实可执行价差 - 自适应价差收敛与价格倒挂套利
         
         Args:
@@ -214,7 +214,7 @@ class SpreadStrategy(HedgeStrategy):
             # 取中位数作为稳定价差
             # stable_spread = statistics.median(spreads)
             # 取最大价差进行安全比较
-            if max:
+            if use_max:
                 stable_spread = max(spreads)
             else:
                 stable_spread = min(spreads)
@@ -232,7 +232,6 @@ class SpreadStrategy(HedgeStrategy):
             
         except Exception as e:
             self.logger.error(f"❌ 真实执行价差计算失败: {e}")
-            return await self.get_stable_current_spread(hedge_bot)
 
     def _get_msgs(self) -> List[str]:
         if self.data['side'] == 'open':
