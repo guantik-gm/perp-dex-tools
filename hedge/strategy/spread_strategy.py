@@ -55,7 +55,7 @@ class SpreadStrategy(HedgeStrategy):
             self.average_spread = baseline_spread  # 更新基准价差
             
             # 2. 单次计算获得当前价差
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=3, use_max=False)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=1, use_max=False)
             self.current_spread = current_spread
             
             # 3. 价差判断
@@ -81,7 +81,7 @@ class SpreadStrategy(HedgeStrategy):
         self.data['side'] = 'close'
         try:
             # 获取当前真实执行价差
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=3, use_max=False)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=1, use_max=False)
             self.current_spread = current_spread
             self.close_spread = current_spread  # 记录预计平仓价差
             
