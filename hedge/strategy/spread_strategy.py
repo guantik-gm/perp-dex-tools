@@ -21,7 +21,8 @@ class SpreadStrategy(HedgeStrategy):
         self.current_spread_sample_count = 10  # 当前价差采样次数（默认值）
         self.profit_threshold = 0.05
         
-        
+        # trading_loop 中将会根据概述性决定primary开仓方向 
+        self.open_side = None
         # 价差状态
         self.open_spread = None  # 预计开仓价差
         self.close_spread = None  # 预计平仓价差
@@ -86,7 +87,7 @@ class SpreadStrategy(HedgeStrategy):
             # 获取当前真实执行价差
             # current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=1, use_max=False)
             # 使用采样区间的最小值
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=False, sample_count=self.current_spread_sample_count, use_max=False)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=self.current_spread_sample_count, use_max=False)
             self.current_spread = current_spread
             self.close_spread = current_spread  # 记录预计平仓价差
             
@@ -148,6 +149,7 @@ class SpreadStrategy(HedgeStrategy):
                     
                     # 动态判断交易方向：总是选择能赚取价差的方向
                     if lighter_mid > primary_mid:
+                        self.open_side = 'buy'
                         # 情况1：Lighter更贵 → 价差收敛策略（做空价差）
                         if not is_closing:  # 开仓：Primary买入，Lighter卖出
                             # Primary maker买单价格（参考EdgeX place_open_order逻辑）
@@ -166,6 +168,7 @@ class SpreadStrategy(HedgeStrategy):
                             self.primary_close_exec_price = primary_exec_price
                             self.lighter_close_exec_price = lighter_exec_price
                     else:
+                        self.open_side = 'sell'
                         # 情况2：Primary更贵 → 传统套利策略（做多价差）
                         if not is_closing:  # 开仓：Primary卖出，Lighter买入
                             # Primary maker卖单价格
