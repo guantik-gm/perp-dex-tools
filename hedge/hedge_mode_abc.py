@@ -490,6 +490,7 @@ class HedgeBotAbc(ABC):
 
         self.primary_order_status = None
         # 注意：不在此处重置计数器，保持跨调用的累积检测
+        # 这里没有检查stop_flag有可能在ctl+c之后触发，需要在外层进行控制
         self.logger.info(f"[OPEN] [{self.primary_exchange_name()}] [{side}] Placing {self.primary_exchange_name()} POST-ONLY order")
         order_id, order_price = await self.place_bbo_order(side, quantity)
 
@@ -738,7 +739,7 @@ class HedgeBotAbc(ABC):
             # Step 1: 开仓（添加重试逻辑）
             max_retries = 1000
             success = False
-            for retry_count in range(max_retries):
+            for retry_count in range(max_retries) and not self.stop_flag:
                 success, need_retry_strategy = await self._execute_hedge_position(open_side, self.order_quantity, triggered_open_strategies)
                 
                 if success:
@@ -794,7 +795,7 @@ class HedgeBotAbc(ABC):
             # Step 2: 第一次平仓（添加重试逻辑）
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             success = False
-            for retry_count in range(max_retries):
+            for retry_count in range(max_retries) and not self.stop_flag:
                 success, need_retry_strategy = await self._execute_hedge_position(close_side, self.order_quantity, triggered_close_strategies)
                 
                 if success:
