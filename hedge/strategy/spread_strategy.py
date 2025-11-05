@@ -274,7 +274,7 @@ class SpreadStrategy(HedgeStrategy):
         else:  # close
             base_msg = [
                 f"📊 价差策略: 价差收敛触发平仓"
-                f"[Primary] 预计开仓价: {self.primary_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {abs(self.primary_open_exec_price - self.primary_open_price)}",
+                f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {abs(self.primary_open_exec_price - self.primary_open_price)}",
                 f"[Primary] 预计平仓价: {self.primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {abs(self.primary_close_exec_price - self.primary_close_price)}",
                 f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {abs(self.lighter_open_exec_price - self.lighter_open_price)}",
                 f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {abs(self.lighter_close_exec_price - self.lighter_close_price)}",
