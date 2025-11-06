@@ -286,7 +286,7 @@ class HedgeMonitor:
                     else:
                         lighter_pnl = (Decimal(str(self.lighter_open_price)) - Decimal(str(self.lighter_close_price))) * Decimal(str(self.lighter_open_quantity))
 
-            total_volume = Decimal(str(self.primary_open_price)) * Decimal(str(self.primary_open_quantity))
+            total_volume = Decimal(str(self.primary_open_price)) * Decimal(str(self.primary_open_quantity)) + Decimal(str(self.primary_close_price)) * Decimal(str(self.primary_close_quantity)) 
             # 计算总收益和收益率
             if lighter_pnl is None:
                 total_pnl = None
@@ -337,8 +337,8 @@ class HedgeMonitor:
                       f"   🏭 {self.primary_exchange_name} PnL: ${primary_pnl:.4f}\n" \
                       f"   💡 Lighter PnL: {lighter_pnl_str}\n" \
                       f"   💯 总收益: {total_pnl_str}\n" \
-                      f"💎 投入本金: ${total_capital:.2f} - 总收益率: {total_return_rate_str}\n" \
-                      f"📈 单边交易量: {total_volume} - 单边磨损率: {ware_rate_str}\n" \
+                      f"💎 双边投入本金: ${total_capital:.2f} - 总收益率: {total_return_rate_str}\n" \
+                      f"📈 单边交易量(开平仓): {total_volume} - 单边磨损率: {ware_rate_str}\n" \
                       f"📋 当前持仓状态: {self.primary_exchange_name}: {current_primary_position:.4f}, Lighter: {current_lighter_position:.4f}\n" \
                       f"{strategy_msg}{position_warning}"
             
