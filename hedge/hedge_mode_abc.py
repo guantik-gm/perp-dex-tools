@@ -561,15 +561,18 @@ class HedgeBotAbc(ABC):
                             if cancel_result.status in ['CANCELED', 'FILLED']:
                                 if cancel_result.status == 'FILLED' or cancel_result.filled_size > 0:
                                     self.logger.info(f"订单取消失败，但订单已全部或部分成交: {cancel_result.filled_size}, 重置 {self.primary_exchange_name()} 订单状态为 FILLED")
-                                    self.primary_order_status = 'FILLED'
                                     order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
                                     # todo: 这里有很多重复代码可以优化, 还要调用log_trade_to_csv，参考order_update_handler
-                                    # todo: side等值目前都是按照edgex来的，还有其他类似的接口返回值，其他交易所执行需要注意
-                                    if cancel_result.side == "buy":
-                                        self.primary_position += cancel_result.filled_size
+                                    # 这里如果处理了，后续websocket延迟更新还会再执行一次，通过self.primary_order_status判断是否已经被ws更新，同理ws中也通过self.primary_order_status判断是否已经被rest主动更新
+                                    if self.primary_order_status != "FILLED":
+                                        if cancel_result.side == "buy":
+                                            self.primary_position += cancel_result.filled_size
+                                        else:
+                                            self.primary_position -= cancel_result.filled_size
+                                        self.primary_order_status = 'FILLED'
+                                        self.handle_primary_order_update(order_data)
                                     else:
-                                        self.primary_position -= cancel_result.filled_size
-                                    self.handle_primary_order_update(order_data)
+                                        self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.primary_position}")
                                     return HedgeOrderResult.SUCCESS
                                 else:
                                     # 只有cancel+filled_size为0是真正的取消状态需要重试
@@ -588,13 +591,16 @@ class HedgeBotAbc(ABC):
                             # 真实场景下，取消成功后也有可能是部分成交了
                             if cancel_result.status == 'FILLED' or cancel_result.filled_size > 0:
                                     self.logger.info(f"订单取消成功，但订单已全部或部分成交: {cancel_result.filled_size}, 重置 {self.primary_exchange_name()} 订单状态为 FILLED")
-                                    self.primary_order_status = 'FILLED'
                                     order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
-                                    if cancel_result.side == "buy":
-                                        self.primary_position += cancel_result.filled_size
+                                    if self.primary_order_status != "FILLED":
+                                        if cancel_result.side == "buy":
+                                            self.primary_position += cancel_result.filled_size
+                                        else:
+                                            self.primary_position -= cancel_result.filled_size
+                                        self.primary_order_status = 'FILLED'
+                                        self.handle_primary_order_update(order_data)
                                     else:
-                                        self.primary_position -= cancel_result.filled_size                                    
-                                    self.handle_primary_order_update(order_data)
+                                        self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.primary_position}")
                                     return HedgeOrderResult.SUCCESS
                             # should_cancel说明当前primary下单价格将会改变，重新计算策略条件（比如价差策略）
                             if triggered_strategies_need_to_replace_order or should_cancel:
@@ -628,12 +634,15 @@ class HedgeBotAbc(ABC):
                         if order_info.status == "FILLED" or order_info.filled_size > 0:
                             # 只有FILLED状态需要调用更新
                             self.logger.info(f"订单已全部或部分成交: {order_info.filled_size}, 重置 {self.primary_exchange_name()} 订单状态为 FILLED, 订单信息: {order_info}")
-                            self.primary_order_status = 'FILLED'
-                            if cancel_result.side == "buy":
-                                self.primary_position += cancel_result.filled_size
+                            if self.primary_order_status != "FILLED":
+                                if cancel_result.side == "buy":
+                                    self.primary_position += cancel_result.filled_size
+                                else:
+                                    self.primary_position -= cancel_result.filled_size
+                                self.primary_order_status = 'FILLED'
+                                self.handle_primary_order_update(order_data)
                             else:
-                                self.primary_position -= cancel_result.filled_size
-                            self.handle_primary_order_update(order_data)
+                                self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.primary_position}")
                             # return也可以不需要，下轮循环直接走FILLED分支
                             return HedgeOrderResult.SUCCESS
                     else:
