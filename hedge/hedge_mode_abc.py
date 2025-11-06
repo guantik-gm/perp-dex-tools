@@ -710,9 +710,9 @@ class HedgeBotAbc(ABC):
             self.logger.error(f"⚠️ Full traceback: {traceback.format_exc()}")
             
             # 发送错误通知
-            await self.monitor.send_error_notification(e, f"尝试执行{side}订单时发生错误")
+            await self.monitor.send_error_notification(e, f"尝试执行{side}订单时发生错误，正在准备重试")
             
-            return False, False
+            return False, True
         
         # 执行对冲部分
         operation_start = time.time()  # 每次操作独立计时

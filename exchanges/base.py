@@ -21,24 +21,7 @@ def query_retry(
     reraise: bool = False
 ):
     def retry_error_callback(retry_state: RetryCallState):
-        exception_str = str(retry_state.outcome.exception())
-        
-        # 检查是否为 429 错误
-        if "429" in exception_str or "too many requests" in exception_str.lower():
-            # 为 429 错误使用更长的延迟
-            base_delay = 2.0  # 基础延迟2秒
-            attempt = retry_state.attempt_number
-            exponential_delay = base_delay * (2 ** attempt)  # 指数退避
-            jitter = random.uniform(0.5, 1.5)  # 添加随机抖动
-            total_delay = min(exponential_delay * jitter, 15.0)  # 最大延迟15秒
-            
-            print(f"Operation: [{retry_state.fn.__name__}] hit rate limit (429), "
-                  f"attempt {attempt}/{max_attempts}, waiting {total_delay:.1f}s before retry")
-            time.sleep(total_delay)
-        else:
-            print(f"Operation: [{retry_state.fn.__name__}] failed after {retry_state.attempt_number} retries, "
-                  f"exception: {exception_str}")
-        
+        print(f"Operation: [{retry_state.fn.__name__}] failed after {retry_state.attempt_number} retries, exception: {str(retry_state.outcome.exception())}")
         return default_return
 
     return retry(
@@ -48,7 +31,6 @@ def query_retry(
         retry_error_callback=retry_error_callback,
         reraise=reraise
     )
-
 
 @dataclass
 class OrderResult:
