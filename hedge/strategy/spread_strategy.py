@@ -87,7 +87,7 @@ class SpreadStrategy(HedgeStrategy):
             # 获取当前真实执行价差
             # current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=1, use_max=False)
             # 使用采样区间的最小值
-            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=self.current_spread_sample_count, use_max=False)
+            current_spread = await self.get_realistic_executable_spread(hedge_bot, is_closing=True, sample_count=self.current_spread_sample_count, use_max=True)
             self.current_spread = current_spread
             self.close_spread = current_spread  # 记录预计平仓价差
             
