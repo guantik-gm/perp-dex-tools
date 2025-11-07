@@ -635,10 +635,10 @@ class HedgeBotAbc(ABC):
                             # 只有FILLED状态需要调用更新
                             self.logger.info(f"订单已全部或部分成交: {order_info.filled_size}, 重置 {self.primary_exchange_name()} 订单状态为 FILLED, 订单信息: {order_info}")
                             if self.primary_order_status != "FILLED":
-                                if cancel_result.side == "buy":
-                                    self.primary_position += cancel_result.filled_size
+                                if order_info.side == "buy":
+                                    self.primary_position += order_info.filled_size
                                 else:
-                                    self.primary_position -= cancel_result.filled_size
+                                    self.primary_position -= order_info.filled_size
                                 self.primary_order_status = 'FILLED'
                                 self.handle_primary_order_update(order_data)
                             else:
@@ -835,8 +835,13 @@ class HedgeBotAbc(ABC):
 
             # Step 2: 第一次平仓（添加重试逻辑）
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
-            if self.primary_position != self.lighter_position:
-                error_msg = f"{self.primary_exchange_name()} position: {self.primary_position} doesnt equals to lighter position: {self.lighter_position}"
+            
+            # 检查对冲状态：两个交易所仓位总和应该接近零（允许小误差）
+            position_sum = self.primary_position + self.lighter_position
+            position_tolerance = self.order_quantity * Decimal('0.005')  # 允许0.5%的误差
+            
+            if abs(position_sum) > position_tolerance:
+                error_msg = f"Position not properly hedged! {self.primary_exchange_name()}: {self.primary_position}, Lighter: {self.lighter_position}, Sum: {position_sum} (tolerance: ±{position_tolerance})"
                 self.logger.error(error_msg)
                 await self.monitor.send_error_notification(error=None, context=error_msg)
                 break
