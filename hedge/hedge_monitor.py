@@ -263,8 +263,11 @@ class HedgeMonitor:
                     primary_pnl = (Decimal(str(self.primary_close_price)) - Decimal(str(self.primary_open_price))) * Decimal(str(self.primary_open_quantity))
                 else:
                     primary_pnl = (Decimal(str(self.primary_open_price)) - Decimal(str(self.primary_close_price))) * Decimal(str(self.primary_open_quantity))
-            primary_open_fee = abs(Decimal(str(self.primary_open_price)) * Decimal(str(self.primary_open_quantity)) * Decimal(str(self.get_primary_fee_rate())))
-            primary_close_fee = abs(Decimal(str(self.primary_close_price)) * Decimal(str(self.primary_close_quantity)) * Decimal(str(self.get_primary_fee_rate())))
+            # 计算手续费（费率为负时表示返还，为正时表示费用）
+            fee_rate = Decimal(str(self.get_primary_fee_rate()))
+            primary_open_fee = Decimal(str(self.primary_open_price)) * Decimal(str(self.primary_open_quantity)) * fee_rate
+            primary_close_fee = Decimal(str(self.primary_close_price)) * Decimal(str(self.primary_close_quantity)) * fee_rate
+            # 从PnL中减去总手续费（负费率时primary_*_fee为负值，减去负值等于加上返还）
             primary_pnl -= (primary_open_fee + primary_close_fee)
             
             try:
