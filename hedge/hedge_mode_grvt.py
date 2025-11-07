@@ -69,3 +69,7 @@ class HedgeBot(HedgeBotAbc):
         logging.getLogger('pysdk.grvt_ccxt_env').setLevel(logging.CRITICAL)
         logging.getLogger('lighter').setLevel(logging.CRITICAL)
         logging.getLogger('lighter.signer_client').setLevel(logging.CRITICAL)
+
+    def primary_fee_rate(self) -> Decimal:
+        # -0.001% / 0.037%
+        return Decimal('-0.00001')
