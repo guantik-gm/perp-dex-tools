@@ -838,7 +838,7 @@ class HedgeBotAbc(ABC):
             if self.primary_position != self.lighter_position:
                 error_msg = f"{self.primary_exchange_name()} position: {self.primary_position} doesnt equals to lighter position: {self.lighter_position}"
                 self.logger.error(error_msg)
-                await self.monitor.send_error_notification(e=None, context=error_msg)
+                await self.monitor.send_error_notification(error=None, context=error_msg)
                 break
             
             success = False
