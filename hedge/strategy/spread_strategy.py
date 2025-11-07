@@ -243,10 +243,18 @@ class SpreadStrategy(HedgeStrategy):
 
     def _get_msgs(self) -> List[str]:
         if self.data['side'] == 'open':
+            # 计算Primary开仓滑点和滑点率
+            primary_open_slippage = abs(self.primary_open_exec_price - self.primary_open_price) if (self.primary_open_exec_price and self.primary_open_price) else 0
+            primary_open_slippage_rate = (primary_open_slippage / self.primary_open_exec_price * 100) if (self.primary_open_exec_price and primary_open_slippage) else 0
+            
+            # 计算Lighter开仓滑点和滑点率
+            lighter_open_slippage = abs(self.lighter_open_exec_price - self.lighter_open_price) if (self.lighter_open_exec_price and self.lighter_open_price) else 0
+            lighter_open_slippage_rate = (lighter_open_slippage / self.lighter_open_exec_price * 100) if (self.lighter_open_exec_price and lighter_open_slippage) else 0
+            
             base_msg = [
                 f"📊 价差策略: 价差大于阈值开仓",
-                f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {abs(self.primary_open_exec_price - self.primary_open_price)}",
-                f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {abs(self.lighter_open_exec_price - self.lighter_open_price)}",
+                f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {primary_open_slippage}, 滑点率: {primary_open_slippage_rate:.6f}%",
+                f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {lighter_open_slippage}, 滑点率: {lighter_open_slippage_rate:.6f}%",
             ]
             
             # 显示预计和实际开仓价差
@@ -276,22 +284,37 @@ class SpreadStrategy(HedgeStrategy):
                 # f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {abs(self.lighter_close_exec_price - self.lighter_close_price)}",
             ]
             
+            # Primary开仓
             if self.primary_open_exec_price is None:
-                base_msg.append(f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: -")
+                base_msg.append(f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: -, 滑点率: -")
             else:
-                base_msg.append(f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {abs(self.primary_open_exec_price - self.primary_open_price)}")
+                primary_open_slippage = abs(self.primary_open_exec_price - self.primary_open_price)
+                primary_open_slippage_rate = (primary_open_slippage / self.primary_open_exec_price * 100) if primary_open_slippage else 0
+                base_msg.append(f"[Primary] 预计开仓价: {self.primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {primary_open_slippage}, 滑点率: {primary_open_slippage_rate:.6f}%")
+            
+            # Primary平仓
             if self.primary_close_exec_price is None:
-                base_msg.append(f"[Primary] 预计平仓价: {self.primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: -")
+                base_msg.append(f"[Primary] 预计平仓价: {self.primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: -, 滑点率: -")
             else:
-                base_msg.append(f"[Primary] 预计平仓价: {self.primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {abs(self.primary_close_exec_price - self.primary_close_price)}")
+                primary_close_slippage = abs(self.primary_close_exec_price - self.primary_close_price)
+                primary_close_slippage_rate = (primary_close_slippage / self.primary_close_exec_price * 100) if primary_close_slippage else 0
+                base_msg.append(f"[Primary] 预计平仓价: {self.primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {primary_close_slippage}, 滑点率: {primary_close_slippage_rate:.6f}%")
+            
+            # Lighter开仓
             if self.lighter_open_exec_price is None:
-                base_msg.append(f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: -")
+                base_msg.append(f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: -, 滑点率: -")
             else:
-                base_msg.append(f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {abs(self.lighter_open_exec_price - self.lighter_open_price)}")
+                lighter_open_slippage = abs(self.lighter_open_exec_price - self.lighter_open_price)
+                lighter_open_slippage_rate = (lighter_open_slippage / self.lighter_open_exec_price * 100) if lighter_open_slippage else 0
+                base_msg.append(f"[Lighter] 预计开仓价: {self.lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {lighter_open_slippage}, 滑点率: {lighter_open_slippage_rate:.6f}%")
+            
+            # Lighter平仓
             if self.lighter_close_exec_price is None:
-                base_msg.append(f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: -")
+                base_msg.append(f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: -, 滑点率: -")
             else:
-                base_msg.append(f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {abs(self.lighter_close_exec_price - self.lighter_close_price)}")
+                lighter_close_slippage = abs(self.lighter_close_exec_price - self.lighter_close_price)
+                lighter_close_slippage_rate = (lighter_close_slippage / self.lighter_close_exec_price * 100) if lighter_close_slippage else 0
+                base_msg.append(f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {lighter_close_slippage}, 滑点率: {lighter_close_slippage_rate:.6f}%")
             
             # 显示预计和实际平仓价差
             predict_spread_msg = ""

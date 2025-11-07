@@ -327,7 +327,8 @@ class LighterProxy:
                                f"最优价: {best_price:.6f}, "
                                f"价格冲击: {price_impact:.2f}%")
             
-            return weighted_avg_price
+            # 返回精度为6位小数的价格
+            return weighted_avg_price.quantize(Decimal('0.000001'))
         else:
             raise ValueError("No quantity could be filled")
 
