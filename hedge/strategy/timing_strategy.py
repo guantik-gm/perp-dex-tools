@@ -13,6 +13,8 @@ class TimingStrategy(HedgeStrategy):
         self.open_wait_range = (0.5, 1.5)
         self.close_wait_range = (10, 20)
         # self.close_wait_range = (2, 3)
+        # 3h后必须平仓, 单位分钟
+        self.max_wait_min = 3 * 60
         
         # 时间控制状态
         self.next_open_time = self.schedule_next_open(*self.open_wait_range)
@@ -68,6 +70,15 @@ class TimingStrategy(HedgeStrategy):
             # 检查时间条件
             reason = f"[时间策略] 未触发, 下次平仓时间: {self._format_time(self.next_close_time)}"
             strategy_result = HedgeStrategyResult.REJECT
+            
+            # 强制平仓检查：只在有持仓时检查
+            if self.position_open_time is not None:
+                current_wait_min = (time.time() - self.position_open_time) / 60 
+                if current_wait_min > self.max_wait_min:
+                    reason = f"⏰ 时间维度满足: 持仓时间 {current_wait_min:.1f} 分钟，超过最大时间 {self.max_wait_min} 分钟，强制关闭"
+                    strategy_result = HedgeStrategyResult.TRIGGER
+            
+            # 常规平仓时间检查
             if self.can_close_by_time():
                 reason = f"⏰ 时间维度满足：到达预定平仓时间: {self._format_time(self.next_close_time)}"
                 strategy_result = HedgeStrategyResult.PASS
@@ -80,7 +91,7 @@ class TimingStrategy(HedgeStrategy):
             self._set_strategy_context(strategy_result, reason)
             
         except Exception as e:
-            self._set_strategy_context(result=HedgeStrategyResult.PASS, reason=f"❌ 时间策略平仓检查失败: {e}")
+            self._set_strategy_context(result=HedgeStrategyResult.REJECT, reason=f"❌ 时间策略平仓检查失败: {e}")
     
     def _get_msgs(self) -> List[str]:
         if self.data['side'] == 'open':
