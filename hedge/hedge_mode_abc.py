@@ -868,8 +868,31 @@ class HedgeBotAbc(ABC):
             self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
             final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
             if final_close_side:
-                if not await self._execute_hedge_position(final_close_side, final_close_quantity, triggered_close_strategies):
-                    break
+                success = False
+                for retry_count in range(max_retries):
+                    if self.stop_flag:
+                        self.logger.warning("收到退出信号，退出平仓流程")
+                        break
+
+                    success, need_retry_strategy = await self._execute_hedge_position(final_close_side, final_close_quantity, triggered_close_strategies)
+
+                    if success:
+                        break  # 成功，继续后续流程
+                    elif need_retry_strategy and retry_count < max_retries - 1:
+                        self.logger.info(f"🔄 平仓订单超时，略过检查平仓策略条件 (重试 {retry_count + 1}/{max_retries})，等待时间 1s")
+                        await asyncio.sleep(1)
+                        # 重新获取平仓策略
+                        # triggered_close_strategies = await self.wait_close()
+                        # if not triggered_close_strategies:
+                            # self.logger.warning("⚠️ 重试时没有策略触发平仓")
+                            # break
+                    else:
+                        # 彻底失败或超过重试次数
+                        self.logger.error("❌ 平仓执行失败，退出交易循环")
+                        break
+            
+            if not success:
+                break
 
             # 平仓完成后发送通知并停止监控
             try:
@@ -884,7 +907,7 @@ class HedgeBotAbc(ABC):
                     )
                 
                 # 停止状态监控任务
-                self.monitor.stop_status_monitor()
+                # self.monitor.stop_status_monitor()
                 
             except Exception as e:
                 self.logger.error(f"Failed to send close notification: {e}")
