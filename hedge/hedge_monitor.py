@@ -351,7 +351,7 @@ class HedgeMonitor:
             self.logger.error(f"Failed to send position close notification: {e}")
 
     async def send_position_status_notification(self, primary_position: Decimal, lighter_position: Decimal,
-                                              strategy: HedgeStrategy, primary_client, lighter_proxy) -> None:
+                                              strategies: List[HedgeStrategy], primary_client, lighter_proxy) -> None:
         """发送持仓状态通知 - 使用策略提供的信息"""
         try:
             results = await asyncio.gather(
@@ -370,7 +370,7 @@ class HedgeMonitor:
             # 发送状态通知
             if self.telegram_bot:
                 # 获取触发类型的友好显示
-                trigger_text = strategy.reason or strategy.name or 'unknown'
+                trigger_text = ["\n".join(f"{strategy.name}: {strategy.reason}") for strategy in strategies] if len(strategies) > 0 else "-"
                 
                 # 检查是否已经开仓
                 if self.primary_open_price is None or self.lighter_open_price is None:
@@ -414,7 +414,7 @@ class HedgeMonitor:
             self.logger.error(f"Failed to send position status notification: {e}")
 
     async def _status_monitor_task(self, primary_position_getter, lighter_position_getter, 
-                                 strategy: HedgeStrategy, primary_client, lighter_proxy):
+                                 strategies: List[HedgeStrategy], primary_client, lighter_proxy):
         """定时状态监控任务 - 每30分钟发送一次持仓状态"""
         self.logger.info("🔔 启动定时状态监控任务（30分钟间隔）")
         
@@ -432,7 +432,7 @@ class HedgeMonitor:
                 if primary_pos != 0 or lighter_pos != 0:
                     self.logger.info("📊 发送定时持仓状态通知")
                     await self.send_position_status_notification(
-                        primary_pos, lighter_pos, strategy, primary_client, lighter_proxy
+                        primary_pos, lighter_pos, strategies, primary_client, lighter_proxy
                     )
                     self.last_status_notification_time = time.time()
                 
@@ -445,13 +445,13 @@ class HedgeMonitor:
                 await asyncio.sleep(300)
 
     def start_status_monitor(self, primary_position_getter, lighter_position_getter,
-                           strategy: HedgeStrategy, primary_client, lighter_proxy):
+                           strategies: List[HedgeStrategy], primary_client, lighter_proxy):
         """启动状态监控任务"""
         if self.status_monitor_task is None or self.status_monitor_task.done():
             self.status_monitor_task = asyncio.create_task(
                 self._status_monitor_task(
                     primary_position_getter, lighter_position_getter,
-                    strategy, primary_client, lighter_proxy
+                    strategies, primary_client, lighter_proxy
                 )
             )
 
