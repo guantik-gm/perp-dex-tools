@@ -425,10 +425,9 @@ class GrvtClient(BaseExchangeClient):
                 self.logger.log(f"[OPEN] Error placing order: {e}", "ERROR")
                 continue
 
+            order_id = order_info.order_id
             last_order_id = order_id
             last_order_price = self.round_to_tick(order_price)
-            order_status = order_info.status
-            order_id = order_info.order_id
 
             if order_info:
                 if order_info.status == 'CANCELED':

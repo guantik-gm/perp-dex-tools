@@ -14,7 +14,8 @@ from hedge.strategy.spread_strategy import SpreadStrategy
 from hedge.strategy.timing_strategy import TimingStrategy
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
+# 与edgex/grvt保持一致: cancel_order, place_open_order, get_ticker_position, get_ticker_position_liquidation_price, get_ticker_position_pnl, get_ticker_position_value
+# 可选: get_funding_rate, get_order_book_depth
 class HedgeBot(HedgeBotAbc):
     """Trading bot that places post-only orders on GRVT and hedges with market orders on Lighter."""
 
