@@ -338,13 +338,16 @@ class GrvtClient(BaseExchangeClient):
                 'order_duration_secs': 30 * 86400 - 1, # GRVT SDK: signature expired cap is 30 days (default 1 day)
             }
         )
+        self.logger.log(f"Order placement result: {order_result}", "INFO")
         if not order_result:
             raise Exception(f"[OPEN] Error placing order")
 
         client_order_id = order_result.get('metadata').get('client_order_id')
         order_status = order_result.get('state').get('status')
         order_status_start_time = time.time()
+        await asyncio.sleep(0.05)
         order_info = await self.get_order_info(client_order_id=client_order_id)
+        self.logger.log(f"Order info after placement: {order_info}", "INFO")
         if order_info is not None:
             order_status = order_info.status
 
@@ -375,8 +378,13 @@ class GrvtClient(BaseExchangeClient):
 
     async def place_open_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
         """Place an open order with GRVT."""
+        max_retries = 100
         attempt = 0
-        while True:
+        last_order_id = None
+        last_order_price = None
+        # current for BTC
+        order_price_diff_rate = 0.0001
+        while attempt < max_retries:
             attempt += 1
             if attempt % 5 == 0:
                 self.logger.log(f"[OPEN] Attempt {attempt} to place order", "INFO")
@@ -402,6 +410,13 @@ class GrvtClient(BaseExchangeClient):
                 order_price = best_bid + self.config.tick_size
             else:
                 raise Exception(f"[OPEN] Invalid direction: {direction}")
+            
+            if last_order_price is not None and abs(self.round_to_tick(order_price) - last_order_price) / last_order_price > order_price_diff_rate:
+                msg = f"Current retry order price has more than {order_price_diff_rate} diff with last order price cancel order execute, last order {last_order_id} status should be [CANCELED]"
+                self.logger.log(msg, "INFO")
+                return OrderResult(success=True, order_id=last_order_id, order_price=last_order_price)
+                
+            self.logger.log(f"Placing open order: side={direction}, size={quantity}, price={self.round_to_tick(order_price)}", "INFO")
 
             # Place the order using GRVT SDK
             try:
@@ -410,24 +425,40 @@ class GrvtClient(BaseExchangeClient):
                 self.logger.log(f"[OPEN] Error placing order: {e}", "ERROR")
                 continue
 
+            last_order_id = order_id
+            last_order_price = self.round_to_tick(order_price)
             order_status = order_info.status
             order_id = order_info.order_id
 
-            if order_status == 'REJECTED':
-                continue
-            if order_status in ['OPEN', 'FILLED']:
+            if order_info:
+                if order_info.status == 'CANCELED':
+                    if attempt < max_retries - 1:
+                        attempt += 1
+                        continue
+                    else:
+                        return OrderResult(success=False, error_message=f'Order rejected after {max_retries} attempts')
+                elif order_info.status in ['OPEN', 'PARTIALLY_FILLED', 'FILLED']:
+                    # Order successfully placed
+                    return OrderResult(
+                        success=True,
+                        order_id=order_id,
+                        side=direction,
+                        size=quantity,
+                        price=order_price,
+                        status=order_info.status
+                    )
+                else:
+                    return OrderResult(success=False, error_message=f'Unexpected order status: {order_info.status}')
+            else:
+                # Assume order is successful if we can't get info
                 return OrderResult(
                     success=True,
                     order_id=order_id,
                     side=direction,
                     size=quantity,
                     price=order_price,
-                    status=order_status
+                    status='OPEN'
                 )
-            elif order_status == 'PENDING':
-                raise Exception("[OPEN] Order not processed after 10 seconds")
-            else:
-                raise Exception(f"[OPEN] Unexpected order status: {order_status}")
 
     async def place_close_order(self, contract_id: str, quantity: Decimal, price: Decimal, side: str) -> OrderResult:
         """Place a close order with GRVT."""
@@ -487,13 +518,23 @@ class GrvtClient(BaseExchangeClient):
     async def cancel_order(self, order_id: str) -> OrderResult:
         """Cancel an order with GRVT."""
         try:
+            # cancel之前先查询订单状态，避免重复取消
+            order_info = await self.get_order_info(order_id)
+            filled_size = Decimal(order_info.filled_size)
+            price = Decimal(order_info.price)
+            side = order_info.side
+            # 注意: grvt使用CANCELLED而不是CANCELED
+            if order_info and order_info.status in ['CANCELLED', 'FILLED']:
+                self.logger.log(f"Order {order_id} already {order_info.status}, no need to cancel", "INFO")
+                return OrderResult(success=False, status=order_info.status, filled_size=filled_size, price=price, side=side, error_message=f'Order already {order_info.status}')
+            
             # Cancel the order using GRVT SDK
             cancel_result = self.rest_client.cancel_order(id=order_id)
 
-            if cancel_result:
-                return OrderResult(success=True)
-            else:
-                return OrderResult(success=False, error_message='Failed to cancel order')
+            if not cancel_result:
+                return OrderResult(success=False, status=order_info.status, filled_size=filled_size, price=price, side=side, error_message='Failed to cancel order')
+            
+            return OrderResult(success=True, status=order_info.status, filled_size=filled_size, price=price, side=side)
 
         except Exception as e:
             return OrderResult(success=False, error_message=str(e))
@@ -527,7 +568,8 @@ class GrvtClient(BaseExchangeClient):
             side=leg.get('is_buying_asset', False) and 'buy' or 'sell',
             size=Decimal(leg.get('size', 0)),
             price=Decimal(leg.get('limit_price', 0)),
-            status=state.get('status', ''),  # Original status: 'OPEN', 'FILLED', 'REJECTED', 'CANCELLED'
+            # 统一转为CANCELED
+            status="CANCELED" if state.get('state', '') == "CANCELLED" else state.get('status', '') ,  # Original status: 'OPEN', 'FILLED', 'REJECTED', 'CANCELLED'
             filled_size=(Decimal(state.get('traded_size', ['0'])[0])
                          if isinstance(state.get('traded_size'), list) else Decimal(0)),
             remaining_size=(Decimal(state.get('book_size', ['0'])[0])

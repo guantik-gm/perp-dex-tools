@@ -315,7 +315,7 @@ class EdgeXClient(BaseExchangeClient):
         max_retries = 100
         retry_count = 0
 
-        last_oredr_id = None
+        last_order_id = None
         last_order_price = None
         # current for BTC
         order_price_diff_rate = 0.0001
