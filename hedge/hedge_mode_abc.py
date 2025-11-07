@@ -835,13 +835,19 @@ class HedgeBotAbc(ABC):
 
             # Step 2: 第一次平仓（添加重试逻辑）
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
+            if self.primary_position != self.lighter_position:
+                error_msg = f"{self.primary_exchange_name()} position: {self.primary_position} doesnt equals to lighter position: {self.lighter_position}"
+                self.logger.error(error_msg)
+                await self.monitor.send_error_notification(e=None, context=error_msg)
+                break
+            
             success = False
             for retry_count in range(max_retries):
                 if self.stop_flag:
                     self.logger.warning("收到退出信号，退出平仓流程")
                     break
                 
-                success, need_retry_strategy = await self._execute_hedge_position(close_side, self.order_quantity, triggered_close_strategies)
+                success, need_retry_strategy = await self._execute_hedge_position(close_side, self.primary_position, triggered_close_strategies)
                 
                 if success:
                     break  # 成功，继续后续流程
