@@ -852,7 +852,8 @@ class HedgeBotAbc(ABC):
                     self.logger.warning("收到退出信号，退出平仓流程")
                     break
                 
-                success, need_retry_strategy = await self._execute_hedge_position(close_side, self.primary_position, triggered_close_strategies)
+                # position可能为负，需要绝对值以兼容原有的self.order_quantity
+                success, need_retry_strategy = await self._execute_hedge_position(close_side, abs(self.primary_position), triggered_close_strategies)
                 
                 if success:
                     break  # 成功，继续后续流程
