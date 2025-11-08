@@ -317,28 +317,28 @@ class SpreadStrategy(HedgeStrategy):
                 base_msg.append(f"[Lighter] 预计平仓价: {self.lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {lighter_close_slippage}, 滑点率: {lighter_close_slippage_rate:.6f}%")
             
             # 显示预计和实际平仓价差
-            predict_spread_msg = ""
-            if self.open_spread is not None:
-                predict_spread_msg += f"📉 预计开仓价差: {self.open_spread:.6f}"
-            if self.actual_open_spread is not None:
-                predict_spread_msg += f" 💰 实际开仓价差: {self.actual_open_spread:.6f}"
-            base_msg.append(predict_spread_msg)
+            # predict_spread_msg = ""
+            # if self.open_spread is not None:
+                # predict_spread_msg += f"📉 预计开仓价差: {self.open_spread:.6f}"
+            # if self.actual_open_spread is not None:
+                # predict_spread_msg += f" 💰 实际开仓价差: {self.actual_open_spread:.6f}"
+            # base_msg.append(predict_spread_msg)
                 
-            actual_spread_msg = ""
-            if self.close_spread is not None:
-                actual_spread_msg += f"📉 预计平仓价差: {self.close_spread:.6f}"
-            if self.actual_close_spread is not None:
-                actual_spread_msg += f" 💰 实际平仓价差: {self.actual_close_spread:.6f}"
-            else:
-                actual_spread_msg += " 💰 实际平仓价差: 待更新"
-            base_msg.append(actual_spread_msg)
+            # actual_spread_msg = ""
+            # if self.close_spread is not None:
+                # actual_spread_msg += f"📉 预计平仓价差: {self.close_spread:.6f}"
+            # if self.actual_close_spread is not None:
+                # actual_spread_msg += f" 💰 实际平仓价差: {self.actual_close_spread:.6f}"
+            # else:
+                # actual_spread_msg += " 💰 实际平仓价差: 待更新"
+            # base_msg.append(actual_spread_msg)
             
-            spread_diff_msg = ""
-            if self.actual_close_spread is not None and self.actual_open_spread is not None:
-                spread_profit = abs(self.actual_open_spread - self.actual_close_spread)
-                spread_predict = abs(self.open_spread - self.close_spread)
-                spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} 💰 实际开平仓价差: {spread_profit:.6f}"
-            base_msg.append(spread_diff_msg)
+            # spread_diff_msg = ""
+            # if self.actual_close_spread is not None and self.actual_open_spread is not None:
+            #     spread_profit = abs(self.actual_open_spread - self.actual_close_spread)
+            #     spread_predict = abs(self.open_spread - self.close_spread)
+            #     spread_diff_msg += f"💸 预计开平仓价差: {spread_predict} 💰 实际开平仓价差: {spread_profit:.6f}"
+            # base_msg.append(spread_diff_msg)
             
             # 添加基准信息
             base_msg.extend([

@@ -79,8 +79,7 @@ class PriceVolatilityStrategy(HedgeStrategy):
             f"⚖️ 波动率阈值: {self.volatility_threshold:.4f} ({self.volatility_threshold:.2%})",
             f"🏭 Primary价格均值: {statistics.mean(self.primary_prices):.6f}" if self.primary_prices else "🏭 Primary价格均值: 无数据",
             f"💡 Lighter价格均值: {statistics.mean(self.lighter_prices):.6f}" if self.lighter_prices else "💡 Lighter价格均值: 无数据",
-            f"📊 采样次数: {len(self.primary_prices)}",
-            f"🔬 计算方法: 价格变化率标准差",
+            f"📊 采样次数: {len(self.primary_prices)}"
         ]
     
     async def calculate_price_volatility(self, hedge_bot):

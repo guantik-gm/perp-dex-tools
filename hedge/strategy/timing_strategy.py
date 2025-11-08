@@ -96,14 +96,12 @@ class TimingStrategy(HedgeStrategy):
     def _get_msgs(self) -> List[str]:
         if self.data['side'] == 'open':
             msgs = [
-                f"📅 到达开仓时间: {self._format_time(self.next_open_time)}",
-                f"📅 预计平仓: {self._format_time(self.next_close_time)}",
+                f"📅 到达开仓时间: {self._format_time(self.next_open_time)} 预计平仓: {self._format_time(self.next_close_time)}",
                 f"📅 持仓时间周期: {self.close_wait_range[0]} - {self.close_wait_range[1]} 分钟",
             ]
         else:  # close
             msgs = [
-                f"📅 到达平仓时间: {self._format_time(self.next_close_time)}",
-                f"📅 下次开仓: {self._format_time(self.next_open_time)}",
+                f"📅 到达平仓时间: {self._format_time(self.next_close_time)} 下次开仓: {self._format_time(self.next_open_time)}",
                 f"📅 开仓时间周期: {self.open_wait_range[0]} - {self.open_wait_range[1]} 分钟",
             ]
             
@@ -115,8 +113,7 @@ class TimingStrategy(HedgeStrategy):
                     holding_minutes = holding_duration / 60
                     
                     msgs.extend([
-                        f"📅 本次开仓时间: {self._format_time(self.position_open_time)}",
-                        f"⏱️ 本次持仓时长: {holding_minutes:.1f} 分钟"
+                        f"📅 本次开仓时间: {self._format_time(self.position_open_time)} 本次持仓时长: {holding_minutes:.1f} 分钟",
                     ])
                 except Exception as e:
                     if self.logger:
@@ -126,8 +123,7 @@ class TimingStrategy(HedgeStrategy):
                 avg_holding = sum(self.position_holding_minutes) / len(self.position_holding_minutes)
                 total_rounds = len(self.position_holding_minutes)
                 msgs.extend([
-                    f"📊 历史持仓统计: 共 {total_rounds} 轮",
-                    f"📊 平均持仓时长: {avg_holding:.1f} 分钟"
+                    f"📊 历史持仓统计: 共 {total_rounds} 轮 平均持仓时长: {avg_holding:.1f} 分钟",
                 ])
         return msgs
     

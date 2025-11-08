@@ -208,8 +208,8 @@ class HedgeMonitor:
             self.lighter_open_quantity = self.get_current_order().current_lighter_quantity
             self.lighter_open_side = lighter_side
             
-            strategy_msgs = [f"【📋 策略: {strategy.name}】\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
-            strategy_msg = "\n触发策略列表\n" + "\n".join(strategy_msgs)
+            strategy_msgs = [f"+++++📋 策略: {strategy.name}+++++\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
+            strategy_msg = "-----\n【触发策略列表】\n" + "\n\n".join(strategy_msgs)
             
             # 构建基础通知模板
             open_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 对冲模式第【{times}】次 - 【开仓执行通知】\n" \
@@ -325,8 +325,8 @@ class HedgeMonitor:
             if abs(current_primary_position) > Decimal('0') or abs(current_lighter_position) > Decimal('0'):
                 position_warning = "\n🚨 警告：平仓后持仓非零，请手动检查！"
             
-            strategy_msgs = [f"【📋 策略: {strategy.name}】\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
-            strategy_msg = "\n触发策略列表\n" + "\n".join(strategy_msgs)
+            strategy_msgs = [f"+++++📋 策略: {strategy.name}+++++\n" + "\t\n".join(strategy.get_msgs()) for strategy in strategies]
+            strategy_msg = "-----\n【触发策略列表】\n" + "\n\n".join(strategy_msgs)
             
             close_msg = f"🔄 【{self.primary_exchange_name}_{self.ticker}】 对冲模式第【{times}】次 - 【平仓执行通知】\n" \
                       f"━━━━━━━━━━━━━━━━━━━━━━\n" \
@@ -335,6 +335,7 @@ class HedgeMonitor:
                       f"🏭 {self.primary_exchange_name} 平仓方向: {self.primary_close_side.upper()}, 平仓数量: {self.primary_close_quantity}, 平仓价格: ${self.primary_close_price:.6f}\n" \
                      f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantity}, 开仓价格: ${self.lighter_open_price:.6f}\n" \
                       f"💡 Lighter 平仓方向: {self.lighter_close_side.upper()}, 平仓数量: {self.lighter_close_quantity}, 平仓价格: ${self.lighter_close_price:.6f}\n" \
+                      "-----\n" \
                       f"📊 双边收益明细:\n" \
                       f"   🏭 {self.primary_exchange_name} 开仓手续费: ${primary_open_fee:.4f}, 平仓手续费: ${primary_close_fee:.4f}, 总手续费: ${primary_open_fee + primary_close_fee:.4f}\n" \
                       f"   🏭 {self.primary_exchange_name} PnL: ${primary_pnl:.4f}\n" \

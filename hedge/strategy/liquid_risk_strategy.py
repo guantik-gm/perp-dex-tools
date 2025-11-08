@@ -73,14 +73,10 @@ class LiquidRiskStrategy(HedgeStrategy):
         lighter_side_str = self.lighter_position_side if self.lighter_position_side is not None else "无"
         
         return [
-            f"🏦 风险交易所: {risk_exchange_str} === 触发清算价格: {risk_liquidation_price_str}",
-            f"📈 开仓价格: {open_price_str}",
-            f"📊 当前价格: {current_price_str}",
-            f"💰 Primary清算价格: {primary_liquidation_str} ({primary_side_str})",
-            f"💰 Lighter清算价格: {lighter_liquidation_str} ({lighter_side_str})",
-            f"🔵 当前风险缓冲: {current_buffer_str}",
-            f"🟢 初始风险缓冲: {initial_buffer_str}",
-            f"🔴 缓冲消耗比例: {buffer_consumed_str}",
+            f"🏦 风险交易所: {risk_exchange_str} 触发清算价格: {risk_liquidation_price_str}",
+            f"📈 开仓价格: {open_price_str} 📊 当前价格: {current_price_str}",
+            f"💰 Primary清算价格: {primary_liquidation_str} ({primary_side_str}) 💰 Lighter清算价格: {lighter_liquidation_str} ({lighter_side_str})",
+            f"🟢 初始风险缓冲: {initial_buffer_str} 🔵 当前风险缓冲: {current_buffer_str} 🔴 缓冲消耗比例: {buffer_consumed_str}",
             f"📊 风险阈值: {self.risk_threshold:.1%}",
         ]
     
