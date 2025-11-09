@@ -216,7 +216,7 @@ class HedgeMonitor:
                      f"━━━━━━━━━━━━━━━━━━━━━━\n" \
                      f"🕐 开仓时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n" \
                      f"🏭 {self.primary_exchange_name} 开仓方向: {self.primary_open_side.upper()}, 持仓数量: {self.primary_open_quantity}, 开仓价格: ${self.primary_open_price:.6f}\n" \
-                     f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantimonitty}, 开仓价格: ${self.lighter_open_price:.6f}\n" \
+                     f"💡 Lighter 开仓方向: {self.lighter_open_side.upper()}, 持仓数量: {self.lighter_open_quantity}, 开仓价格: ${self.lighter_open_price:.6f}\n" \
                      f"{strategy_msg}"
             
             self.telegram_bot.send_text(open_msg)
