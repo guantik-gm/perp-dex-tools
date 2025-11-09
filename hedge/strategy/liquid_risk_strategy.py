@@ -11,16 +11,14 @@ class LiquidRiskStrategy(HedgeStrategy):
     
     def __init__(self, priority=100):
         super().__init__(open_priority=priority, close_priority=priority)
-        self.risk_threshold = 0.8  # 当前价格到清算价格距离开仓价格到清算记录的80%
+        self.risk_threshold = 0.02  # 当前价格到清算价格距离不能小于2%, 再涨/跌2%到达清算线
         self.logger = None
         self.risk_exchange = None
         self.risk_liquidation_price = None
-        self.open_price = None
         
-        # 缓冲信息属性
-        self.current_risk_buffer = None
-        self.initial_risk_buffer = None
-        self.buffer_consumed_ratio = None
+        # 风险距离信息
+        self.primary_risk_distance = None
+        self.lighter_risk_distance = None
         
         self.primary_liquidation_price = None
         self.lighter_liquidation_price = None
@@ -54,18 +52,17 @@ class LiquidRiskStrategy(HedgeStrategy):
     def _get_msgs(self) -> List[str]:
         # 安全地获取数据，避免 None 值格式化错误
         risk_exchange_str = self.risk_exchange if self.risk_exchange is not None else "无"
-        risk_liquidation_price_str = f"{self.risk_liquidation_price:.6f}" if self.risk_liquidation_price is not None else "无"
-        open_price_str = f"{self.open_price:.6f}" if self.open_price is not None else "无"
         
         # 安全地获取 price_data
         price_data = getattr(self, 'data', {}).get('price_data', {})
-        current_price = price_data.get('primary_mid', 0) if price_data else 0
-        current_price_str = f"{current_price:.6f}" if current_price else "0.000000"
+        primary_price = price_data.get('primary_mid', 0) if price_data else 0
+        lighter_price = price_data.get('lighter_mid', 0) if price_data else 0
+        primary_price_str = f"{primary_price:.6f}" if primary_price else "0.000000"
+        lighter_price_str = f"{lighter_price:.6f}" if lighter_price else "0.000000"
         
-        # 获取缓冲信息
-        current_buffer_str = f"{self.current_risk_buffer:.2%}" if self.current_risk_buffer is not None else "无"
-        initial_buffer_str = f"{self.initial_risk_buffer:.2%}" if self.initial_risk_buffer is not None else "无"
-        buffer_consumed_str = f"{self.buffer_consumed_ratio:.2%}" if self.buffer_consumed_ratio is not None else "无"
+        # 获取风险距离信息
+        primary_risk_str = f"{self.primary_risk_distance:.2%}" if self.primary_risk_distance is not None else "无"
+        lighter_risk_str = f"{self.lighter_risk_distance:.2%}" if self.lighter_risk_distance is not None else "无"
         
         primary_liquidation_str = f"{self.primary_liquidation_price:.6f}" if self.primary_liquidation_price is not None else "无"
         lighter_liquidation_str = f"{self.lighter_liquidation_price:.6f}" if self.lighter_liquidation_price is not None else "无"
@@ -73,11 +70,10 @@ class LiquidRiskStrategy(HedgeStrategy):
         lighter_side_str = self.lighter_position_side if self.lighter_position_side is not None else "无"
         
         return [
-            f"🏦 风险交易所: {risk_exchange_str} 触发清算价格: {risk_liquidation_price_str}",
-            f"📈 开仓价格: {open_price_str} 📊 当前价格: {current_price_str}",
-            f"💰 Primary清算价格: {primary_liquidation_str} ({primary_side_str}) 💰 Lighter清算价格: {lighter_liquidation_str} ({lighter_side_str})",
-            f"🟢 初始风险缓冲: {initial_buffer_str} 🔵 当前风险缓冲: {current_buffer_str} 🔴 缓冲消耗比例: {buffer_consumed_str}",
-            f"📊 风险阈值: {self.risk_threshold:.1%}",
+            f"📊 当前价格 - Primary: {primary_price_str} | Lighter: {lighter_price_str}",
+            f"💰 清算价格 - Primary: {primary_liquidation_str} ({primary_side_str}) | Lighter: {lighter_liquidation_str} ({lighter_side_str})",
+            f"⚠️ 风险距离 - Primary: {primary_risk_str} | Lighter: {lighter_risk_str}",
+            f"🚨 风险阈值: {self.risk_threshold:.1%} | 触发交易所: {risk_exchange_str}",
         ]
     
     async def _check_liquidation_risk(self, hedge_bot, current_sample):
@@ -135,12 +131,12 @@ class LiquidRiskStrategy(HedgeStrategy):
             
             # 检查Primary风险
             if primary_liquidation is not None:
-                if self._check_single_exchange_risk(hedge_bot.primary_exchange_name(), current_primary_mid, primary_liquidation, hedge_bot):
+                if self._check_single_exchange_risk(hedge_bot.primary_exchange_name(), current_primary_mid, primary_liquidation):
                     return True
             
             # 检查Lighter风险
             if lighter_liquidation is not None:
-                if self._check_single_exchange_risk("Lighter", current_lighter_mid, lighter_liquidation, hedge_bot):
+                if self._check_single_exchange_risk("Lighter", current_lighter_mid, lighter_liquidation):
                     return True
             
             return False
@@ -149,46 +145,35 @@ class LiquidRiskStrategy(HedgeStrategy):
             self.logger.error(f"❌ 风险控制检查失败: {e}")
             return False
     
-    def _check_single_exchange_risk(self, exchange_name, current_price, liquidation_price, hedge_bot):
+    def _check_single_exchange_risk(self, exchange_name, current_price, liquidation_price):
         """检查单个交易所的清算风险"""
         if liquidation_price is None or liquidation_price <= 0:
             return False
+        
+        # 检查当前价格有效性，防止除零错误
+        if current_price is None or current_price <= 0:
+            self.logger.warning(f"⚠️ {exchange_name}当前价格无效: {current_price}")
+            return False
+        
         current_price = Decimal(str(current_price))
         liquidation_price = Decimal(str(liquidation_price))
         
-        # 获取开仓价格和持仓方向
-        order_handler = hedge_bot.get_current_order_handler()
+        # 计算当前价格到清算价格的距离百分比
+        risk_distance = abs(current_price - liquidation_price) / current_price
         
-        # 如果有当前开仓价格，使用它；否则尝试获取历史开仓价格
-        if order_handler.current_primary_price is not None:
-            self.open_price = order_handler.current_primary_price
+        # 保存风险距离信息
+        if exchange_name == "Lighter":
+            self.lighter_risk_distance = risk_distance
+        else:
+            # Primary 或其他主交易所
+            self.primary_risk_distance = risk_distance
         
-        open_price = Decimal(str(self.open_price))
-        
-        # 计算当前还能跌/涨多少%到清算 (a)
-        current_risk_buffer = abs(current_price - liquidation_price) / current_price
-        
-        # 计算开仓时总共能跌/涨多少%到清算 (b) 
-        initial_risk_buffer = abs(open_price - liquidation_price) / open_price
-        
-        # 计算风险缓冲消耗比例
-        buffer_consumed_ratio = 1 - (current_risk_buffer / initial_risk_buffer) if initial_risk_buffer > 0 else 1
-        
-        # 保存到对象属性中
-        self.current_risk_buffer = current_risk_buffer
-        self.initial_risk_buffer = initial_risk_buffer
-        self.buffer_consumed_ratio = buffer_consumed_ratio
-        
-        # 触发条件：当前风险缓冲 <= 初始风险缓冲 * risk_threshold
-        risk_threshold_value = initial_risk_buffer * Decimal(self.risk_threshold)
-        
-        if current_risk_buffer <= risk_threshold_value:
-            
+        # 风险判断：当前价格到清算价格的距离小于阈值则触发
+        if risk_distance <= Decimal(self.risk_threshold):
             self.logger.warning(
                 f"🚨 {exchange_name}清算风险警告: "
-                f"当前价格{current_price:.6f}, 清算价格{liquidation_price:.6f}, 开仓价格{open_price:.6f}, "
-                f"当前风险缓冲{current_risk_buffer:.2%}, 初始风险缓冲{initial_risk_buffer:.2%}, "
-                f"风险缓冲已消耗{buffer_consumed_ratio:.2%}, 触发阈值{self.risk_threshold:.2%}"
+                f"当前价格{current_price:.6f}, 清算价格{liquidation_price:.6f}, "
+                f"风险距离{risk_distance:.2%}, 触发阈值{self.risk_threshold:.2%}"
             )
             self.risk_exchange = exchange_name
             self.risk_liquidation_price = liquidation_price
@@ -196,8 +181,45 @@ class LiquidRiskStrategy(HedgeStrategy):
         else:
             self.logger.debug(
                 f"✅ {exchange_name}清算风险正常: "
-                f"当前价格{current_price:.6f}, 清算价格{liquidation_price:.6f}, 开仓价格{open_price:.6f}, "
-                f"当前风险缓冲{current_risk_buffer:.2%}, 初始风险缓冲{initial_risk_buffer:.2%}"
+                f"当前价格{current_price:.6f}, 清算价格{liquidation_price:.6f}, "
+                f"风险距离{risk_distance:.2%}"
             )
             return False
+
+    def after_open_hedge_position(self, hedge_bot):
+        """完整的对冲仓位开仓后触发，可以拿到开仓后的价格信息"""
+        try:
+            self.logger = hedge_bot.logger
+            
+            # 安全的异步调用：检查事件循环状态
+            try:
+                # 尝试获取当前运行的事件循环
+                loop = asyncio.get_running_loop()
+                # 如果成功，说明已在事件循环中，创建异步任务
+                loop.create_task(self._update_risk_info_async(hedge_bot))
+                self.logger.info("✅ 开仓后风险信息更新任务已创建（异步执行）")
+                # 注意：这里不等待任务完成，避免阻塞事件循环
+                # 如果需要获取结果，可以在后续的 can_close() 调用中获取
+            except RuntimeError:
+                # 没有运行的事件循环，安全使用 asyncio.run
+                asyncio.run(self._update_risk_info_async(hedge_bot))
+                self.logger.info("✅ 开仓后风险信息更新完成（同步执行）")
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"❌ 开仓后风险信息更新失败: {e}")
     
+    async def _update_risk_info_async(self, hedge_bot):
+        """异步更新开仓后的风险信息"""
+        try:
+            # 获取当前价格数据
+            current_sample = await self._get_current_price_data(hedge_bot)
+            self.data['price_data'] = current_sample
+            
+            # 检查清算风险（不触发平仓，只更新风险信息）
+            await self._check_liquidation_risk(hedge_bot, current_sample)
+            
+            self.logger.info("✅ 开仓后清算风险信息已更新")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 异步更新风险信息失败: {e}")
