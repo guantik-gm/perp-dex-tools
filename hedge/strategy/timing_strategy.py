@@ -11,7 +11,7 @@ class TimingStrategy(HedgeStrategy):
     def __init__(self, priority=20):
         super().__init__(open_priority=priority, close_priority=priority)
         self.open_wait_range = (0.5, 1.5)
-        self.close_wait_range = (10, 20)
+        self.close_wait_range = (20, 50)
         # self.close_wait_range = (2, 3)
         # 3h后必须平仓, 单位分钟
         self.max_wait_min = 3 * 60

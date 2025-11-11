@@ -26,6 +26,7 @@ class LiquidRiskStrategy(HedgeStrategy):
         self.lighter_position_side = None
         
     async def can_open(self, hedge_bot):
+        self.logger = hedge_bot.logger
         """风险策略不主动触发开仓，只做被动检查"""
         self._set_strategy_context(result=HedgeStrategyResult.PASS, reason="开仓无清算风险")
         
@@ -120,6 +121,8 @@ class LiquidRiskStrategy(HedgeStrategy):
                 self.lighter_position_side = "short"
             else:
                 self.lighter_position_side = "无持仓"
+                
+            self.logger.info(f"{hedge_bot.primary_exchange_name()} 清算价: {self.primary_liquidation_price}({self.primary_position_side}), Lighter 清算价: {self.lighter_liquidation_price}({self.lighter_position_side})")
             
             # 如果都获取失败，则跳过检查
             if primary_liquidation is None and lighter_liquidation is None:
