@@ -7,11 +7,11 @@ from decimal import Decimal
 import sys
 import os
 
-from hedge.hedge_mode_abc import Config, HedgeBotAbc
-from hedge.strategy.liquid_risk_strategy import LiquidRiskStrategy
-from hedge.strategy.price_volatility_strategy import PriceVolatilityStrategy
-from hedge.strategy.spread_strategy import SpreadStrategy
-from hedge.strategy.timing_strategy import TimingStrategy
+from hedge_v1.hedge_mode_abc import Config, HedgeBotAbc
+from hedge_v1.strategy.liquid_risk_strategy import LiquidRiskStrategy
+from hedge_v1.strategy.price_volatility_strategy import PriceVolatilityStrategy
+from hedge_v1.strategy.spread_strategy import SpreadStrategy
+from hedge_v1.strategy.timing_strategy import TimingStrategy
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 

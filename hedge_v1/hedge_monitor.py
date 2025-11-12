@@ -11,7 +11,7 @@ import logging
 from decimal import Decimal
 from typing import List, Optional
 
-from hedge.strategy.hedge_strategy import HedgeStrategy
+from hedge_v1.strategy.hedge_strategy import HedgeStrategy
 from helpers.telegram_bot import TelegramBot
 
 

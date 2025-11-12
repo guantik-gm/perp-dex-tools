@@ -3,7 +3,7 @@ import asyncio
 from decimal import Decimal
 from typing import List
 
-from hedge.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
+from hedge_v1.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
 
 
 class LiquidRiskStrategy(HedgeStrategy):

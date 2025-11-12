@@ -5,7 +5,7 @@ import asyncio
 import statistics
 from typing import List
 
-from hedge.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
+from hedge_v1.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
 
 class PriceVolatilityStrategy(HedgeStrategy):
     """价格波动策略 - 基于两个交易所价格波动率的独立控制策略"""

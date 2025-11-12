@@ -4,7 +4,7 @@ import statistics
 from typing import List
 from decimal import Decimal
 
-from hedge.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
+from hedge_v1.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
 
 class SpreadStrategy(HedgeStrategy):
     """统一价差策略 - 自适应价差收敛与价格倒挂套利

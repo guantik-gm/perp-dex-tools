@@ -3,7 +3,7 @@ import time
 import random
 from typing import List
 
-from hedge.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
+from hedge_v1.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
 
 class TimingStrategy(HedgeStrategy):
     """时间策略 - 中等优先级，集成TimingController功能"""

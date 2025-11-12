@@ -17,9 +17,9 @@ from typing import List, Tuple
 import sys
 import os
 
-from hedge.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
-from hedge.lighter_proxy import LighterProxy
-from hedge.hedge_monitor import HedgeMonitor
+from hedge_v1.strategy.hedge_strategy import HedgeStrategy, HedgeStrategyResult
+from hedge_v1.lighter_proxy import LighterProxy
+from hedge_v1.hedge_monitor import HedgeMonitor
 from helpers.logger import log_trade_to_csv
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
