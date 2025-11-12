@@ -13,7 +13,7 @@ Supported exchanges:
     - extended: Uses HedgeBot from hedge_mode_ext.py (Extended + Lighter)
     - apex: Uses HedgeBot from hedge_mode_apex.py (Apex + Lighter)
     - grvt: Uses HedgeBot from hedge_mode_grvt.py (GRVT + Lighter)
-    - edgex: Uses HedgeBot from hedge_mode_edgex.py (EdgeX + Lighter)
+    - edgex: Uses HedgeBot from hedge_mode_edgex.py (edgeX + Lighter)
 
 Cross-platform compatibility:
     - Works on Linux, macOS, and Windows
@@ -38,7 +38,7 @@ Examples:
     python hedge_mode.py --exchange extended --ticker ETH --size 0.1 --iter 5
     python hedge_mode.py --exchange apex --ticker BTC --size 0.002 --iter 10
     python hedge_mode.py --exchange grvt --ticker BTC --size 0.05 --iter 10
-    python hedge_mode.py --exchange edgex --ticker BTC --size 0.002 --iter 10
+    python hedge_mode.py --exchange edgex --ticker BTC --size 0.001 --iter 20
         """
     )
     
@@ -52,6 +52,8 @@ Examples:
                         help='Number of iterations to run')
     parser.add_argument('--fill-timeout', type=int, default=5,
                         help='Timeout in seconds for maker order fills (default: 5)')
+    parser.add_argument('--sleep', type=int, default=0,
+                        help='Sleep time in seconds after each step (default: 0)')
     parser.add_argument('--env-file', type=str, default=".env",
                         help=".env file path (default: .env)")
     
@@ -122,7 +124,8 @@ async def main():
             ticker=args.ticker.upper(),
             order_quantity=Decimal(args.size),
             fill_timeout=args.fill_timeout,
-            iterations=args.iter
+            iterations=args.iter,
+            sleep_time=args.sleep
         )
         
         # Run the bot
