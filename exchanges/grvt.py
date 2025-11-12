@@ -12,7 +12,6 @@ from pysdk.grvt_ccxt_ws import GrvtCcxtWS
 from pysdk.grvt_ccxt_env import GrvtEnv, GrvtWSEndpointType
 
 from .base import BaseExchangeClient, OrderResult, OrderInfo, query_retry
-from .status_utils import is_order_filled, is_order_canceled
 from helpers.logger import TradingLogger
 
 
@@ -128,10 +127,6 @@ class GrvtClient(BaseExchangeClient):
         """Get the exchange name."""
         return "grvt"
 
-    def set_stats(self, stats) -> None:
-        """Set the stats object for tracking fees from WebSocket fills."""
-        self._stats = stats
-
     def setup_order_update_handler(self, handler) -> None:
         """Setup order update handler for WebSocket."""
         self._order_update_handler = handler
@@ -197,71 +192,12 @@ class GrvtClient(BaseExchangeClient):
                                 self.logger.log(f"Ignoring order update with status: {mapped_status}", "DEBUG")
                         else:
                             self.logger.log(f"Order update missing order_id or status: {data}", "DEBUG")
-                    elif isinstance(data, dict):
-                        # Handle fill messages for fee tracking (feed without legs)
-                        # Check if this is a fill message
-                        if 'trade_id' in data or 'fee' in data:
-                            # Extract fill data
-                            instrument = data.get('instrument', '')
-                            fee = data.get('fee', None)
-                            fee_rate_raw = data.get('fee_rate', None)  # GRVT may provide fee_rate directly
-                            size = data.get('size', None)
-                            price = data.get('price', None)
-                            is_buyer = data.get('is_buyer', False)
-                            is_taker = data.get('is_taker', None)  # Get is_taker field for liquidity role
-                            trade_id = data.get('trade_id', '')
-                            order_id = data.get('order_id', '')
-
-                            # Only process fills for our contract
-                            if instrument == self.config.contract_id and fee is not None:
-                                # Record fee to stats if available
-                                if hasattr(self, '_stats') and self._stats:
-                                    try:
-                                        fee_decimal = abs(Decimal(fee))  # Use abs to handle rebates
-                                        self._stats.record_actual_fee(fee_decimal)
-                                        self.logger.log(f"Recorded fill fee: ${fee_decimal} from trade_id={trade_id}", "DEBUG")
-
-                                        # Also log fill to CSV with fee information
-                                        if size and price:
-                                            side = 'buy' if is_buyer else 'sell'
-                                            size_decimal = Decimal(size)
-                                            price_decimal = Decimal(price)
-
-                                            # Use fee_rate from message if available, otherwise calculate
-                                            if fee_rate_raw is not None:
-                                                fee_rate = abs(Decimal(fee_rate_raw)) * Decimal(100)  # Convert to percentage
-                                            else:
-                                                # Calculate fee rate: fee_rate = fee / (size * price)
-                                                notional_value = size_decimal * price_decimal
-                                                fee_rate = (fee_decimal / notional_value * Decimal(100)) if notional_value > 0 else Decimal('0')
-
-                                            # Determine liquidity role from is_taker field
-                                            liquidity_role = None
-                                            if is_taker is not None:
-                                                liquidity_role = 'Taker' if is_taker else 'Maker'
-
-                                            self.logger.log_transaction(
-                                                order_id=order_id or trade_id,
-                                                side=side,
-                                                quantity=size_decimal,
-                                                price=price_decimal,
-                                                status="FILLED",
-                                                fee=fee_decimal,
-                                                fee_rate=fee_rate,  # Fee rate as percentage
-                                                liquidity_role=liquidity_role  # Pass liquidity role (Maker/Taker)
-                                            )
-                                    except Exception as e:
-                                        self.logger.log(f"Error recording fill fee: {e}", "WARN")
-                            else:
-                                self.logger.log(f"Fill message for different contract or missing fee: {instrument}", "DEBUG")
-                        else:
-                            self.logger.log(f"Feed message without order legs or fill data: {data}", "DEBUG")
                     else:
-                        self.logger.log(f"Feed data is not a dict: {data}", "DEBUG")
+                        self.logger.log(f"Order update data is not dict or missing legs: {data}", "DEBUG")
                 else:
-                    # Handle messages without 'feed' field
+                    # Handle other message types (position, fill, etc.)
                     method = message.get('method', 'unknown')
-                    self.logger.log(f"Received non-feed message: {method}", "DEBUG")
+                    self.logger.log(f"Received non-order message: {method}", "DEBUG")
 
             except Exception as e:
                 self.logger.log(f"Error handling order update: {e}", "ERROR")
@@ -282,9 +218,8 @@ class GrvtClient(BaseExchangeClient):
             self.logger.log("WebSocket not ready yet; will subscribe after connect()", "INFO")
 
     async def _subscribe_to_orders(self, callback):
-        """Subscribe to order and fill updates asynchronously."""
+        """Subscribe to order updates asynchronously."""
         try:
-            # Subscribe to order updates
             await self._ws_client.subscribe(
                 stream="order",
                 callback=callback,
@@ -293,16 +228,6 @@ class GrvtClient(BaseExchangeClient):
             )
             await asyncio.sleep(0)  # Small delay like in test file
             self.logger.log(f"Successfully subscribed to order updates for {self.config.contract_id}", "INFO")
-
-            # Subscribe to fill updates for real-time fee tracking
-            await self._ws_client.subscribe(
-                stream="fill",
-                callback=callback,
-                ws_end_point_type=GrvtWSEndpointType.TRADE_DATA_RPC_FULL,
-                params={"instrument": self.config.contract_id}
-            )
-            await asyncio.sleep(0)
-            self.logger.log(f"Successfully subscribed to fill updates for {self.config.contract_id}", "INFO")
         except Exception as e:
             self.logger.log(f"Error in subscription task: {e}", "ERROR")
 
@@ -345,6 +270,7 @@ class GrvtClient(BaseExchangeClient):
         client_order_id = order_result.get('metadata').get('client_order_id')
         order_status = order_result.get('state').get('status')
         order_status_start_time = time.time()
+        # grvt订单可能有延迟
         await asyncio.sleep(0.05)
         order_info = await self.get_order_info(client_order_id=client_order_id)
         self.logger.log(f"Order info after placement: {order_info}", "INFO")
@@ -378,6 +304,7 @@ class GrvtClient(BaseExchangeClient):
 
     async def place_open_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
         """Place an open order with GRVT."""
+        # 基本逻辑和edgex对齐
         max_retries = 100
         attempt = 0
         last_order_id = None
@@ -411,8 +338,9 @@ class GrvtClient(BaseExchangeClient):
             else:
                 raise Exception(f"[OPEN] Invalid direction: {direction}")
             
+            # 价格偏差过大时以取消的状态返回上层处理
             if last_order_price is not None and abs(self.round_to_tick(order_price) - last_order_price) / last_order_price > order_price_diff_rate:
-                msg = f"Current retry order price has more than {order_price_diff_rate} diff with last order price cancel order execute, last order {last_order_id} status should be [CANCELED]"
+                msg = f"Current retry order price has more than {order_price_diff_rate} diff with last order price, cancel order execute, last order {last_order_id} status should be [CANCELED]"
                 self.logger.log(msg, "INFO")
                 return OrderResult(success=True, order_id=last_order_id, order_price=last_order_price)
                 
@@ -435,9 +363,10 @@ class GrvtClient(BaseExchangeClient):
                         attempt += 1
                         continue
                     else:
-                        return OrderResult(success=False, error_message=f'Order rejected after {max_retries} attempts')
+                        return OrderResult(success=False, error_message=f'Order canceled/rejected after {max_retries} attempts')
                 elif order_info.status in ['OPEN', 'PARTIALLY_FILLED', 'FILLED']:
                     # Order successfully placed
+                    # 只有部分成交的情况下也以当前成交数量返回，不等待继续成交了，与edgex一致
                     return OrderResult(
                         success=True,
                         order_id=order_id,
@@ -522,8 +451,7 @@ class GrvtClient(BaseExchangeClient):
             filled_size = Decimal(order_info.filled_size)
             price = Decimal(order_info.price)
             side = order_info.side
-            # 注意: grvt使用CANCELLED而不是CANCELED
-            if order_info and order_info.status in ['CANCELLED', 'FILLED']:
+            if order_info and order_info.status in ['CANCELED', 'FILLED']:
                 self.logger.log(f"Order {order_id} already {order_info.status}, no need to cancel", "INFO")
                 return OrderResult(success=False, status=order_info.status, filled_size=filled_size, price=price, side=side, error_message=f'Order already {order_info.status}')
             
@@ -601,14 +529,13 @@ class GrvtClient(BaseExchangeClient):
 
             leg = legs[0]  # Get first leg
             state = order.get('state', {})
-            
-            # Return original status (backward compatible)
+
             order_list.append(OrderInfo(
                 order_id=order.get('order_id', ''),
                 side=leg.get('is_buying_asset', False) and 'buy' or 'sell',
                 size=Decimal(leg.get('size', 0)),
                 price=Decimal(leg.get('limit_price', 0)),
-                status=state.get('status', ''),  # Original status: 'OPEN', 'FILLED', 'REJECTED', 'CANCELLED'
+                status=state.get('status', ''),
                 filled_size=(Decimal(state.get('traded_size', ['0'])[0])
                              if isinstance(state.get('traded_size'), list) else Decimal(0)),
                 remaining_size=(Decimal(state.get('book_size', ['0'])[0])
@@ -656,159 +583,6 @@ class GrvtClient(BaseExchangeClient):
                 return self.config.contract_id, self.config.tick_size
 
         raise ValueError(f"Contract not found for ticker: {ticker}")
-
-    async def place_market_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
-        """Place a market order with GRVT."""
-        try:
-            # GRVT SDK: Market orders are created by calling create_order with order_type="market"
-            # From pysdk source: is_market = order_type == "market" (grvt_ccxt_utils.py:455)
-            order_result = self.rest_client.create_order(
-                symbol=contract_id,
-                order_type="market",  # This sets is_market=True internally
-                side=direction,
-                amount=quantity,
-                price=0,  # Market orders don't need limit price
-                params={
-                    'time_in_force': 'IMMEDIATE_OR_CANCEL'  # TimeInForce enum name
-                }
-            )
-            
-            if not order_result:
-                return OrderResult(success=False, error_message='Failed to place market order')
-
-            client_order_id = order_result.get('metadata', {}).get('client_order_id')
-            order_status = order_result.get('state', {}).get('status')
-            
-            # Wait for order to fill
-            max_wait = 10  # seconds
-            start_time = time.time()
-            
-            while time.time() - start_time < max_wait:
-                order_info = await self.get_order_info(client_order_id=client_order_id)
-                if order_info:
-                    if order_info.status == 'FILLED':
-                        return OrderResult(
-                            success=True,
-                            order_id=order_info.order_id,
-                            side=direction,
-                            size=order_info.filled_size,
-                            price=order_info.price,
-                            status='FILLED',
-                            filled_size=order_info.filled_size
-                        )
-                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
-                        # Use utility function to check (handles REJECTED, CANCELED, CANCELLED)
-                        return OrderResult(
-                            success=False,
-                            order_id=order_info.order_id,
-                            error_message=f'Market order canceled/rejected'
-                        )
-                await asyncio.sleep(0.2)
-            
-            # Timeout
-            return OrderResult(
-                success=False,
-                order_id=client_order_id,
-                error_message='Market order timeout'
-            )
-                
-        except Exception as e:
-            self.logger.log(f"Error placing market order: {e}", "ERROR")
-            return OrderResult(success=False, error_message=str(e))
-
-    async def place_ioc_order(self, contract_id: str, quantity: Decimal, price: Decimal,
-                             direction: str) -> OrderResult:
-        """Place an IOC (Immediate-Or-Cancel) limit order with GRVT."""
-        try:
-            # Round price to tick size
-            price = self.round_to_tick(price)
-            
-            # Place the IOC order using GRVT SDK
-            # GRVT uses time_in_force parameter with value "IMMEDIATE_OR_CANCEL"
-            order_result = self.rest_client.create_limit_order(
-                symbol=contract_id,
-                side=direction,
-                amount=quantity,
-                price=price,
-                params={
-                    'time_in_force': 'IMMEDIATE_OR_CANCEL',  # IOC
-                    # Note: IOC orders don't need order_duration_secs as they cancel immediately
-                }
-            )
-            
-            if not order_result:
-                return OrderResult(success=False, error_message='Failed to place IOC order')
-
-            client_order_id = order_result.get('metadata', {}).get('client_order_id')
-            
-            # Wait for IOC order to complete
-            max_wait = 5  # seconds
-            start_time = time.time()
-            
-            while time.time() - start_time < max_wait:
-                order_info = await self.get_order_info(client_order_id=client_order_id)
-                if order_info:
-                    # Use utility function to check status (handles FILLED, REJECTED, CANCELLED, CANCELED)
-                    if is_order_filled(order_info.status, order_info.cancel_reason):
-                        # Fully filled
-                        return OrderResult(
-                            success=True,
-                            order_id=order_info.order_id,
-                            side=direction,
-                            size=quantity,
-                            price=price,
-                            status='FILLED',
-                            filled_size=order_info.filled_size
-                        )
-                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
-                        # IOC was canceled/rejected, check if partially filled
-                        if order_info.filled_size > 0:
-                            # Partially filled before cancellation
-                            return OrderResult(
-                                success=True,
-                                order_id=order_info.order_id,
-                                side=direction,
-                                size=quantity,
-                                price=price,
-                                status='PARTIALLY_FILLED',
-                                filled_size=order_info.filled_size
-                            )
-                        else:
-                            # Not filled at all
-                            return OrderResult(
-                                success=False,
-                                order_id=order_info.order_id,
-                                side=direction,
-                                size=quantity,
-                                price=price,
-                                status='CANCELED',
-                                filled_size=Decimal('0'),
-                                error_message='IOC order not filled'
-                            )
-                await asyncio.sleep(0.1)
-            
-            # Timeout - check if partially filled
-            order_info = await self.get_order_info(client_order_id=client_order_id)
-            if order_info and order_info.filled_size > 0:
-                return OrderResult(
-                    success=True,
-                    order_id=order_info.order_id,
-                    side=direction,
-                    size=quantity,
-                    price=price,
-                    status='PARTIALLY_FILLED',
-                    filled_size=order_info.filled_size
-                )
-            
-            return OrderResult(
-                success=False,
-                order_id=client_order_id,
-                error_message='IOC order timeout'
-            )
-                
-        except Exception as e:
-            self.logger.log(f"Error placing IOC order: {e}", "ERROR")
-            return OrderResult(success=False, error_message=str(e))
 
     @query_retry(default_return=0)
     async def get_ticker_position(self) -> Decimal:

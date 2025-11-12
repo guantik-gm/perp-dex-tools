@@ -251,49 +251,6 @@ class EdgeXClient(BaseExchangeClient):
         best_ask = Decimal(asks[0]['price']) if asks and len(asks) > 0 else 0
         return best_bid, best_ask
 
-    @query_retry(default_return={'bids': [], 'asks': [], 'timestamp': 0})
-    async def get_order_book_depth(self, contract_id: str, limit: int = 15) -> Dict:
-        """
-        获取完整订单簿深度数据
-        
-        Args:
-            contract_id: 合约ID
-            limit: 深度档位限制（最大15）
-            
-        Returns:
-            {
-                'bids': [{'price': Decimal, 'size': Decimal}, ...],
-                'asks': [{'price': Decimal, 'size': Decimal}, ...],
-                'timestamp': int
-            }
-        """
-        import time
-        
-        depth_params = GetOrderBookDepthParams(contract_id=contract_id, limit=min(limit, 15))
-        order_book = await self.client.quote.get_order_book_depth(depth_params)
-        order_book_data = order_book['data']
-        
-        if not order_book_data:
-            return {'bids': [], 'asks': [], 'timestamp': int(time.time() * 1000)}
-            
-        order_book_entry = order_book_data[0]
-        
-        # 转换为统一格式
-        bids_data = [
-            {'price': Decimal(bid['price']), 'size': Decimal(bid['size'])} 
-            for bid in order_book_entry.get('bids', [])
-        ]
-        asks_data = [
-            {'price': Decimal(ask['price']), 'size': Decimal(ask['size'])} 
-            for ask in order_book_entry.get('asks', [])
-        ]
-        
-        return {
-            'bids': bids_data,
-            'asks': asks_data,
-            'timestamp': int(time.time() * 1000)
-        }
-
     async def get_order_price(self, direction: str) -> Decimal:
         """Get the price of an order with EdgeX using official SDK."""
         best_bid, best_ask = await self.fetch_bbo_prices(self.config.contract_id)
@@ -334,7 +291,7 @@ class EdgeXClient(BaseExchangeClient):
                     # For sell orders, place slightly above best bid to ensure execution
                     order_price = best_bid + self.config.tick_size
                     side = OrderSide.SELL
-
+                # 价差偏差过大直接以cancel的状态返回上层处理
                 if last_order_price is not None and abs(self.round_to_tick(order_price) - last_order_price) / last_order_price > order_price_diff_rate:
                     msg = f"Current retry order price has more than {order_price_diff_rate} diff with last order price cancel order execute, last order {last_order_id} status should be [CANCELED]"
                     self.logger.log(msg, "INFO")
@@ -601,44 +558,6 @@ class EdgeXClient(BaseExchangeClient):
                 position_amt = 0
         return position_amt
 
-    @query_retry(default_return=0)
-    async def get_ticker_position(self) -> Decimal:
-        """Get account positions using official SDK."""
-        # 接口文档地址: https://edgex-1.gitbook.io/edgeX-documentation/api/private-api/account-api#get-account-asset
-        position = None
-        positions_data = await self.client.get_account_positions()
-        if not positions_data or 'data' not in positions_data:
-            self.logger.log("No positions or failed to get positions", "WARNING")
-        else:
-            positions = positions_data.get('data', {}).get('positionAssetList', [])
-            if positions:
-                for p in positions:
-                    if isinstance(p, dict) and p.get('contractId') == self.config.contract_id:
-                        position = p
-                        break
-        return position
-
-    async def get_ticker_position_liquidation_price(self) -> Decimal:
-        """获取指定合约的强平价"""
-        position = await self.get_ticker_position()
-        if position is None:
-            raise ValueError("No position found for liquidation price calculation")
-        return Decimal(position["liquidatePrice"])
-    
-    async def get_ticker_position_pnl(self) -> Decimal:
-        position = await self.get_ticker_position()
-        if position is None:
-            raise ValueError("No position found for position PnL")
-        # unrealizePnl, termRealizePnl
-        return Decimal(position["totalRealizePnl"])
-    
-    async def get_ticker_position_value(self) -> Decimal:
-        position = await self.get_ticker_position()
-        if position is None:
-            raise ValueError("No position found for position value")
-        # unrealizePnl, termRealizePnl
-        return Decimal(position["positionValue"])
-    
     async def get_contract_attributes(self) -> Tuple[str, Decimal]:
         """Get contract ID for a ticker."""
         ticker = self.config.ticker
@@ -676,6 +595,44 @@ class EdgeXClient(BaseExchangeClient):
         self.config.tick_size = Decimal(current_contract.get('tickSize'))
 
         return self.config.contract_id, self.config.tick_size
+
+    @query_retry(default_return=0)
+    async def get_ticker_position(self) -> Decimal:
+        """Get account positions using official SDK."""
+        # 接口文档地址: https://edgex-1.gitbook.io/edgeX-documentation/api/private-api/account-api#get-account-asset
+        position = None
+        positions_data = await self.client.get_account_positions()
+        if not positions_data or 'data' not in positions_data:
+            self.logger.log("No positions or failed to get positions", "WARNING")
+        else:
+            positions = positions_data.get('data', {}).get('positionAssetList', [])
+            if positions:
+                for p in positions:
+                    if isinstance(p, dict) and p.get('contractId') == self.config.contract_id:
+                        position = p
+                        break
+        return position
+
+    async def get_ticker_position_liquidation_price(self) -> Decimal:
+        """获取指定合约的强平价"""
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for liquidation price calculation")
+        return Decimal(position["liquidatePrice"])
+    
+    async def get_ticker_position_pnl(self) -> Decimal:
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for position PnL")
+        # unrealizePnl, termRealizePnl
+        return Decimal(position["totalRealizePnl"])
+    
+    async def get_ticker_position_value(self) -> Decimal:
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for position value")
+        # unrealizePnl, termRealizePnl
+        return Decimal(position["positionValue"])
 
     @query_retry(default_return=Decimal('0'))
     async def get_funding_rate(self, contract_id: str) -> Decimal:
@@ -765,3 +722,46 @@ class EdgeXClient(BaseExchangeClient):
         except Exception as e:
             self.logger.log(f"❌ 获取账户余额失败: {e}", "ERROR")
             return {}
+        
+    @query_retry(default_return={'bids': [], 'asks': [], 'timestamp': 0})
+    async def get_order_book_depth(self, contract_id: str, limit: int = 15) -> Dict:
+        """
+        获取完整订单簿深度数据
+        
+        Args:
+            contract_id: 合约ID
+            limit: 深度档位限制（最大15）
+            
+        Returns:
+            {
+                'bids': [{'price': Decimal, 'size': Decimal}, ...],
+                'asks': [{'price': Decimal, 'size': Decimal}, ...],
+                'timestamp': int
+            }
+        """
+        import time
+        
+        depth_params = GetOrderBookDepthParams(contract_id=contract_id, limit=min(limit, 15))
+        order_book = await self.client.quote.get_order_book_depth(depth_params)
+        order_book_data = order_book['data']
+        
+        if not order_book_data:
+            return {'bids': [], 'asks': [], 'timestamp': int(time.time() * 1000)}
+            
+        order_book_entry = order_book_data[0]
+        
+        # 转换为统一格式
+        bids_data = [
+            {'price': Decimal(bid['price']), 'size': Decimal(bid['size'])} 
+            for bid in order_book_entry.get('bids', [])
+        ]
+        asks_data = [
+            {'price': Decimal(ask['price']), 'size': Decimal(ask['size'])} 
+            for ask in order_book_entry.get('asks', [])
+        ]
+        
+        return {
+            'bids': bids_data,
+            'asks': asks_data,
+            'timestamp': int(time.time() * 1000)
+        }

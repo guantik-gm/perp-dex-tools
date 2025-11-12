@@ -10,7 +10,6 @@ from typing import Dict, Any, List, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 
 from .base import BaseExchangeClient, OrderResult, OrderInfo
-from .status_utils import is_order_filled, is_order_canceled
 from helpers.logger import TradingLogger
 
 
@@ -166,10 +165,6 @@ class ParadexClient(BaseExchangeClient):
         """Get the exchange name."""
         return "paradex"
 
-    def set_stats(self, stats) -> None:
-        """Set the stats object for tracking fees from WebSocket fills."""
-        self._stats = stats
-
     def setup_order_update_handler(self, handler) -> None:
         """Setup order update handler for WebSocket."""
         self._order_update_handler = handler
@@ -226,54 +221,11 @@ class ParadexClient(BaseExchangeClient):
                                 'filled_size': filled_size
                             })
 
-            elif ws_channel == ParadexWebsocketChannel.FILLS:
-                # Extract fill data including fee and liquidity role
-                fill_id = data.get("id")
-                order_id = data.get("order_id")
-                market = data.get("market")
-                size = data.get("size")
-                price = data.get("price")
-                side = data.get("side", "").lower()
-                fee = data.get("fee")
-                liquidity = data.get("liquidity")  # Get liquidity role (Maker/Taker)
-
-                if market != self.config.contract_id:
-                    return
-
-                # Record fee to stats if available
-                if fee and hasattr(self, '_stats') and self._stats:
-                    try:
-                        fee_decimal = abs(Decimal(fee))  # Use abs to handle rebates
-                        self._stats.record_actual_fee(fee_decimal)
-                        self.logger.log(f"Recorded fill fee: ${fee_decimal} from fill_id={fill_id}", "DEBUG")
-
-                        # Also log fill to CSV with fee information
-                        if size and price:
-                            size_decimal = Decimal(size)
-                            price_decimal = Decimal(price)
-
-                            # Calculate fee rate for verification: fee_rate = fee / (size * price)
-                            notional_value = size_decimal * price_decimal
-                            fee_rate = (fee_decimal / notional_value * Decimal(100)) if notional_value > 0 else Decimal('0')
-
-                            self.logger.log_transaction(
-                                order_id=order_id or fill_id,
-                                side=side,
-                                quantity=size_decimal,
-                                price=price_decimal,
-                                status="FILLED",
-                                fee=fee_decimal,
-                                fee_rate=fee_rate,  # Fee rate as percentage
-                                liquidity_role=liquidity  # Pass liquidity role (Maker/Taker)
-                            )
-                    except Exception as e:
-                        self.logger.log(f"Error recording fill fee: {e}", "WARN")
-
         # Store the handler for later use
         self._ws_order_update_handler = order_update_handler
 
     async def _setup_websocket_subscription(self) -> None:
-        """Setup WebSocket subscription for order updates and fills."""
+        """Setup WebSocket subscription for order updates."""
         if not hasattr(self, '_ws_order_update_handler'):
             return
 
@@ -288,28 +240,19 @@ class ParadexClient(BaseExchangeClient):
             self._ws_connected = True
             self.logger.log("WebSocket connected for order monitoring", "INFO")
 
-        # Subscribe to orders and fills channels for the specific market
+        # Subscribe to orders channel for the specific market
         from paradex_py.api.ws_client import ParadexWebsocketChannel
 
         contract_id = self.config.contract_id
         try:
-            # Subscribe to ORDERS channel
             await self.paradex.ws_client.subscribe(
                 ParadexWebsocketChannel.ORDERS,
                 callback=self._ws_order_update_handler,
                 params={"market": contract_id}
             )
             self.logger.log(f"Subscribed to order updates for {contract_id}", "INFO")
-
-            # Subscribe to FILLS channel for real-time fee tracking
-            await self.paradex.ws_client.subscribe(
-                ParadexWebsocketChannel.FILLS,
-                callback=self._ws_order_update_handler,
-                params={"market": contract_id}
-            )
-            self.logger.log(f"Subscribed to fill updates for {contract_id}", "INFO")
         except Exception as e:
-            self.logger.log(f"Failed to subscribe to order/fill updates: {e}", "ERROR")
+            self.logger.log(f"Failed to subscribe to order updates: {e}", "ERROR")
 
     @retry(
         stop=stop_after_attempt(5),
@@ -456,15 +399,27 @@ class ParadexClient(BaseExchangeClient):
             else:
                 break
 
-        # Order successfully placed
-        return OrderResult(
-            success=True,
-            order_id=order_id,
-            side=direction,
-            size=quantity,
-            price=order_price,
-            status=order_status
-        )
+        if order_status in ['OPEN']:
+            # Order successfully placed
+            return OrderResult(
+                success=True,
+                order_id=order_id,
+                side=direction,
+                size=quantity,
+                price=order_price,
+                status=order_status
+            )
+        elif order_status == 'CLOSED' and remaining_size == 0:
+            return OrderResult(
+                success=True,
+                order_id=order_id,
+                side=direction,
+                size=quantity,
+                price=order_price,
+                status=order_status
+            )
+        else:
+            raise Exception(f"[OPEN] [{order_id}] Unexpected order status: {order_status}")
 
     async def _get_active_close_orders(self, contract_id: str) -> int:
         """Get active close orders for a contract using official SDK."""
@@ -555,15 +510,12 @@ class ParadexClient(BaseExchangeClient):
             order_data = self.paradex.api_client.fetch_order(order_id)
             size = Decimal(order_data.get('size', 0)).quantize(self.order_size_increment, rounding=ROUND_HALF_UP)
             remaining_size = Decimal(order_data.get('remaining_size', 0))
-            
-            # Return original status from API (backward compatible)
-            # Do not map here to maintain compatibility with existing code
             return OrderInfo(
                 order_id=order_data.get('id', ''),
                 side=order_data.get('side', '').lower(),
                 size=size,
                 price=Decimal(order_data.get('price', 0)),
-                status=order_data.get('status', ''),  # Original status: 'NEW', 'OPEN', 'CLOSED'
+                status=order_data.get('status', ''),
                 filled_size=size - remaining_size,
                 remaining_size=remaining_size,
                 cancel_reason=order_data.get('cancel_reason', '')
@@ -595,18 +547,14 @@ class ParadexClient(BaseExchangeClient):
         # Filter orders for the specific market
         contract_orders = []
         for order in order_list:
-            size = Decimal(order.get('size', 0))
-            remaining_size = Decimal(order.get('remaining_size', 0))
-            
-            # Return original status (backward compatible)
             contract_orders.append(OrderInfo(
                 order_id=order.get('id', ''),
                 side=order.get('side', '').lower(),
-                size=size,
+                size=Decimal(order.get('remaining_size', 0)),  # FIXME: This is wrong. Should be size
                 price=Decimal(order.get('price', 0)),
-                status=order.get('status', ''),  # Original status: 'NEW', 'OPEN'
-                filled_size=size - remaining_size,
-                remaining_size=remaining_size
+                status=order.get('status', ''),
+                filled_size=Decimal(order.get('size', 0)) - Decimal(order.get('remaining_size', 0)),
+                remaining_size=Decimal(order.get('remaining_size', 0))
             ))
 
         return contract_orders
@@ -719,177 +667,3 @@ class ParadexClient(BaseExchangeClient):
             raise ValueError("Failed to get tick size")
 
         return self.config.contract_id, self.config.tick_size
-
-    async def place_market_order(self, contract_id: str, quantity: Decimal, direction: str) -> OrderResult:
-        """Place a market order with Paradex."""
-        from paradex_py.common.order import Order, OrderType, OrderSide
-
-        # Convert direction to OrderSide
-        if direction == 'buy':
-            order_side = OrderSide.Buy
-        elif direction == 'sell':
-            order_side = OrderSide.Sell
-        else:
-            return OrderResult(success=False, error_message=f'Invalid direction: {direction}')
-
-        # Create market order
-        order = Order(
-            market=contract_id,
-            order_type=OrderType.Market,
-            order_side=order_side,
-            size=quantity.quantize(self.order_size_increment, rounding=ROUND_HALF_UP)
-        )
-
-        try:
-            # Submit order
-            order_result = self._submit_order_with_retry(order)
-            order_id = order_result.get('id')
-            
-            # Wait for order to fill (market orders should fill quickly)
-            max_wait = 5  # seconds (reduced from 10)
-            start_time = time.time()
-            order_info = None
-            
-            while time.time() - start_time < max_wait:
-                order_info = await self.get_order_info(order_id)
-                if order_info:
-                    # Use utility function to check status (handles original Paradex status: CLOSED, FILLED, etc)
-                    if is_order_filled(order_info.status, order_info.cancel_reason):
-                        return OrderResult(
-                            success=True,
-                            order_id=order_id,
-                            side=direction,
-                            size=order_info.filled_size,
-                            price=order_info.price,
-                            status='FILLED',
-                            filled_size=order_info.filled_size
-                        )
-                    # Check if canceled
-                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
-                        return OrderResult(
-                            success=False,
-                            order_id=order_id,
-                            error_message=f'Market order canceled: {order_info.cancel_reason}'
-                        )
-                await asyncio.sleep(0.2)
-            
-            # If we get here, order didn't fill in time
-            if order_info:
-                return OrderResult(
-                    success=False,
-                    order_id=order_id,
-                    error_message=f'Market order timeout. Status: {order_info.status}'
-                )
-            else:
-                return OrderResult(
-                    success=False,
-                    order_id=order_id,
-                    error_message='Failed to get order status'
-                )
-                
-        except Exception as e:
-            self.logger.log(f"Error placing market order: {e}", "ERROR")
-            return OrderResult(success=False, error_message=str(e))
-
-    async def place_ioc_order(self, contract_id: str, quantity: Decimal, price: Decimal, 
-                             direction: str) -> OrderResult:
-        """Place an IOC (Immediate-Or-Cancel) limit order with Paradex."""
-        from paradex_py.common.order import Order, OrderType, OrderSide
-
-        # Convert direction to OrderSide
-        if direction == 'buy':
-            order_side = OrderSide.Buy
-        elif direction == 'sell':
-            order_side = OrderSide.Sell
-        else:
-            return OrderResult(success=False, error_message=f'Invalid direction: {direction}')
-
-        # Round price to tick size
-        price = self.round_to_tick(price)
-
-        # Create IOC order
-        order = Order(
-            market=contract_id,
-            order_type=OrderType.Limit,
-            order_side=order_side,
-            size=quantity.quantize(self.order_size_increment, rounding=ROUND_HALF_UP),
-            limit_price=price,
-            instruction="IOC"  # Immediate-Or-Cancel
-        )
-
-        try:
-            # Submit order
-            order_result = self._submit_order_with_retry(order)
-            order_id = order_result.get('id')
-            
-            # Wait briefly for IOC order to process
-            max_wait = 5  # seconds
-            start_time = time.time()
-            order_info = None
-            
-            while time.time() - start_time < max_wait:
-                order_info = await self.get_order_info(order_id)
-                if order_info:
-                    # Use utility function to check status (handles original Paradex status: CLOSED, FILLED, etc)
-                    if is_order_filled(order_info.status, order_info.cancel_reason):
-                        return OrderResult(
-                            success=True,
-                            order_id=order_id,
-                            side=direction,
-                            size=quantity,
-                            price=price,
-                            status='FILLED' if order_info.filled_size == quantity else 'PARTIALLY_FILLED',
-                            filled_size=order_info.filled_size
-                        )
-                    # Check if canceled
-                    elif is_order_canceled(order_info.status, order_info.cancel_reason):
-                        # Check if there was any partial fill before cancellation
-                        if order_info.filled_size > 0:
-                            # Partial fill
-                            return OrderResult(
-                                success=True,
-                                order_id=order_id,
-                                side=direction,
-                                size=quantity,
-                                price=price,
-                                status='PARTIALLY_FILLED',
-                                filled_size=order_info.filled_size
-                            )
-                        else:
-                            # Not filled at all
-                            return OrderResult(
-                                success=False,
-                                order_id=order_id,
-                                side=direction,
-                                size=quantity,
-                                price=price,
-                                status='CANCELED',
-                                filled_size=Decimal('0'),
-                                error_message='IOC order not filled'
-                            )
-                await asyncio.sleep(0.1)
-            
-            # If we get here, timeout waiting for status
-            if order_info:
-                filled_size = order_info.filled_size
-                if filled_size > 0:
-                    # Partial fill before timeout
-                    return OrderResult(
-                        success=True,
-                        order_id=order_id,
-                        side=direction,
-                        size=quantity,
-                        price=price,
-                        status='PARTIALLY_FILLED',
-                        filled_size=filled_size
-                    )
-            
-            return OrderResult(
-                success=False,
-                order_id=order_id,
-                error_message='IOC order timeout'
-            )
-                
-        except Exception as e:
-            self.logger.log(f"Error placing IOC order: {e}", "ERROR")
-            return OrderResult(success=False, error_message=str(e))
