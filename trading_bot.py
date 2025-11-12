@@ -11,8 +11,7 @@ from decimal import Decimal
 from typing import Optional
 
 from exchanges import ExchangeFactory
-from exchanges.base import OrderResult
-from helpers import TradingLogger, TradingStats
+from helpers import TradingLogger
 from helpers.lark_bot import LarkBot
 from helpers.telegram_bot import TelegramBot
 
@@ -83,25 +82,6 @@ class TradingBot:
         self.shutdown_requested = False
         self.loop = None
 
-        self.order_utilization_alerts = {
-            0.5: False,
-            0.8: False,
-            1.0: False,
-        }
-
-        self.open_positions = []
-        self.loss_alert_thresholds = [Decimal('0.5'), Decimal('0.8'), Decimal('1.0')]
-        self.last_loss_check_time = 0
-        self.loss_check_interval = 60
-        self.cumulative_trade_count = 0
-        self.cumulative_base_volume = Decimal('0')
-        self.cumulative_quote_volume = Decimal('0')
-        self.last_report_time = 0
-        self.report_interval = 1800
-        
-        # Enhanced statistics tracking
-        self.stats = TradingStats()
-
         # Register order callback
         self._setup_websocket_handlers()
 
@@ -132,10 +112,6 @@ class TradingBot:
                 side = message.get('side', '')
                 order_type = message.get('order_type', '')
                 filled_size = Decimal(message.get('filled_size'))
-                try:
-                    price = Decimal(str(message.get('price', '0')))
-                except Exception:
-                    price = Decimal('0')
                 if order_type == "OPEN":
                     self.current_order_status = status
 
@@ -223,9 +199,6 @@ class TradingBot:
             self.order_filled_amount = 0.0
 
             # Place the order
-            # 等待 WebSocket 事件同步，避免上一订单状态未更新导致重复下单
-            await asyncio.sleep(0.2)
-
             order_result = await self.exchange_client.place_open_order(
                 self.config.contract_id,
                 self.config.quantity,
@@ -250,201 +223,6 @@ class TradingBot:
             self.logger.log(f"Error placing order: {e}", "ERROR")
             self.logger.log(f"Traceback: {traceback.format_exc()}", "ERROR")
             return False
-
-    async def _get_mid_price(self) -> Decimal:
-        """Get the current mid price from the order book."""
-        try:
-            best_bid, best_ask = await self.exchange_client.fetch_bbo_prices(self.config.contract_id)
-            return (best_bid + best_ask) / Decimal('2')
-        except Exception as e:
-            self.logger.log(f"Error getting mid price: {e}", "ERROR")
-            # Fallback to using get_order_price
-            return await self.exchange_client.get_order_price(self.config.close_order_side)
-
-    async def _smart_close_with_ioc(self, quantity: Decimal, side: str) -> OrderResult:
-        """
-        Smart close: Try IOC limit order first, fall back to market order if needed.
-        
-        Args:
-            quantity: The quantity to close
-            side: The side of the close order ('buy' or 'sell')
-            
-        Returns:
-            OrderResult with filled information
-        """
-        # Get current market price
-        mid_price = await self._get_mid_price()
-        
-        # Calculate IOC price (allow small slippage tolerance)
-        ioc_tolerance = Decimal('0.0001')  # 0.01% tolerance
-        if side == 'sell':
-            ioc_price = mid_price * (Decimal('1') - ioc_tolerance)
-        else:  # buy
-            ioc_price = mid_price * (Decimal('1') + ioc_tolerance)
-        
-        ioc_result = None
-        remaining_quantity = quantity
-        
-        # Try IOC limit order first
-        try:
-            self.logger.log(f"[CLOSE_IOC] Attempting IOC order: {quantity} @ {ioc_price}", "INFO")
-            
-            # Record IOC attempt (protected)
-            try:
-                self.stats.record_ioc_attempt(quantity)
-            except Exception:
-                pass
-            
-            ioc_result = await self.exchange_client.place_ioc_order(
-                self.config.contract_id,
-                quantity,
-                ioc_price,
-                side
-            )
-            
-            if ioc_result.success and ioc_result.filled_size:
-                filled_size = ioc_result.filled_size
-                remaining_quantity = quantity - filled_size
-                
-                if filled_size >= quantity:
-                    # Fully filled via IOC!
-                    self.logger.log(
-                        f"[CLOSE_IOC] ✅ IOC fully filled: {filled_size} @ {ioc_result.price}", 
-                        "INFO"
-                    )
-                    # Record IOC success (protected)
-                    try:
-                        self.stats.record_ioc_result(filled_size, quantity, False)
-                    except Exception:
-                        pass
-                    return ioc_result
-                elif filled_size > 0:
-                    # Partially filled
-                    self.logger.log(
-                        f"[CLOSE_IOC] ⚠️ IOC partially filled: {filled_size}/{quantity}, "
-                        f"remaining: {remaining_quantity}",
-                        "INFO"
-                    )
-            else:
-                # IOC didn't fill at all
-                self.logger.log(f"[CLOSE_IOC] IOC not filled, will use market order", "INFO")
-                
-        except Exception as e:
-            self.logger.log(f"[CLOSE_IOC] IOC order error: {e}, falling back to market order", "WARN")
-        
-        # Fall back to market order for remaining quantity
-        if remaining_quantity > 0:
-            self.logger.log(
-                f"[CLOSE_MARKET] Placing market order for remaining: {remaining_quantity}",
-                "INFO"
-            )
-            
-            try:
-                market_result = await self.exchange_client.place_market_order(
-                    self.config.contract_id,
-                    remaining_quantity,
-                    side
-                )
-                
-                if market_result.success:
-                    self.logger.log(
-                        f"[CLOSE_MARKET] ✅ Market order filled: {market_result.filled_size} @ {market_result.price}",
-                        "INFO"
-                    )
-                    
-                    # Record IOC result with market fallback (protected)
-                    if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
-                        try:
-                            self.stats.record_ioc_result(ioc_result.filled_size, quantity, True)
-                        except Exception:
-                            pass
-                    
-                    # Combine IOC and market results
-                    if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
-                        # Both IOC and market filled
-                        total_filled = ioc_result.filled_size + market_result.filled_size
-                        # Weighted average price
-                        avg_price = (
-                            (ioc_result.price * ioc_result.filled_size + 
-                             market_result.price * market_result.filled_size) / total_filled
-                        )
-                        
-                        return OrderResult(
-                            success=True,
-                            order_id=market_result.order_id,
-                            side=side,
-                            size=total_filled,
-                            price=avg_price,
-                            status='FILLED',
-                            filled_size=total_filled
-                        )
-                    else:
-                        return market_result
-                else:
-                    self.logger.log(
-                        f"[CLOSE_MARKET] ❌ Market order failed: {market_result.error_message}",
-                        "ERROR"
-                    )
-
-                    # 兜底的 MARKET 订单失败，统一触发 TG 告警
-                    ioc_filled = ioc_result.filled_size if (ioc_result and ioc_result.success) else 0
-                    remaining = quantity - ioc_filled
-                    alert_msg = (
-                        f"⚠️ [{self.config.exchange.upper()}_{self.config.contract}] "
-                        f"兜底平仓订单失败，请手动处理！\n\n"
-                        f"IOC 成交: {ioc_filled}/{quantity}\n"
-                        f"剩余数量: {remaining}\n"
-                        f"失败原因: {market_result.error_message}\n\n"
-                        f"当前可能有未平仓位，请检查并手动平仓！"
-                    )
-                    try:
-                        await self.send_notification(alert_msg)
-                    except Exception as e:
-                        self.logger.log(f"Failed to send TG alert: {e}", "ERROR")
-
-                    # Check if IOC had partial fill - don't lose that information!
-                    if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
-                        self.logger.log(
-                            f"[CLOSE_IOC] ⚠️ Returning partial fill from IOC: {ioc_result.filled_size}/{quantity}",
-                            "WARN"
-                        )
-                        return OrderResult(
-                            success=True,  # IOC partially succeeded
-                            order_id=ioc_result.order_id,
-                            side=side,
-                            size=quantity,
-                            price=ioc_result.price,
-                            status='PARTIALLY_FILLED',
-                            filled_size=ioc_result.filled_size
-                        )
-                    else:
-                        # Complete failure - neither IOC nor market worked
-                        return market_result
-                    
-            except Exception as e:
-                self.logger.log(f"[CLOSE_MARKET] Market order error: {e}", "ERROR")
-                
-                # Check if IOC had partial fill - don't lose that information!
-                if ioc_result and ioc_result.success and ioc_result.filled_size > 0:
-                    self.logger.log(
-                        f"[CLOSE_IOC] ⚠️ Returning partial fill from IOC after market error: {ioc_result.filled_size}/{quantity}",
-                        "WARN"
-                    )
-                    return OrderResult(
-                        success=True,  # IOC partially succeeded
-                        order_id=ioc_result.order_id,
-                        side=side,
-                        size=quantity,
-                        price=ioc_result.price,
-                        status='PARTIALLY_FILLED',
-                        filled_size=ioc_result.filled_size
-                    )
-                else:
-                    # Complete failure
-                    return OrderResult(success=False, error_message=str(e))
-        
-        # Should not reach here, but return ioc_result as fallback
-        return ioc_result if ioc_result else OrderResult(success=False, error_message="No orders placed")
 
     async def _handle_order_result(self, order_result) -> bool:
         """Handle the result of an order placement."""
@@ -550,7 +328,6 @@ class TradingBot:
                             order_info = await self.exchange_client.get_order_info(order_id)
                             self.order_filled_amount = order_info.filled_size
 
-            # 如果有成交量，需要平仓（部分成交或完全成交）
             if self.order_filled_amount > 0:
                 close_side = self.config.close_order_side
                 if self.config.boost_mode:
@@ -614,9 +391,6 @@ class TradingBot:
                 self.logger.log(f"Current Position: {position_amt} | Active closing amount: {active_close_amount} | "
                                 f"Order quantity: {len(self.active_close_orders)}")
                 self.last_log_time = time.time()
-                await self._maybe_send_order_utilization_alert(len(self.active_close_orders))
-                await self._check_position_loss()
-                await self._maybe_send_runtime_report(position_amt, active_close_amount)
                 # Check for position mismatch
                 if abs(position_amt - active_close_amount) > (2 * self.config.quantity):
                     error_message = f"\n\nERROR: [{self.config.exchange.upper()}_{self.config.ticker.upper()}] "
@@ -736,12 +510,6 @@ class TradingBot:
 
             # Capture the running event loop for thread-safe callbacks
             self.loop = asyncio.get_running_loop()
-
-            # Pass stats to exchange client for real-time fee tracking from WebSocket
-            if hasattr(self.exchange_client, 'set_stats'):
-                self.exchange_client.set_stats(self.stats)
-                self.logger.log("Stats object passed to exchange client for real-time fee tracking", "INFO")
-
             # Connect to exchange
             await self.exchange_client.connect()
 
