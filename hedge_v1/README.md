@@ -73,6 +73,8 @@ hedge_v1/
 
 ### 2. 价差策略 (SpreadStrategy)
 
+注意：由于默认对冲策略中需要等待价差收敛后才平仓，因此会有一定的持仓时间（根据市场波动和配置的盈利阈值，BTC盈利阈值5%的配置下，持仓时间大概5～30分钟不等），如需无视价差磨损直接开平仓请将价差策略移除或者直接使用原本对冲模式。
+
 - **优先级**: 10 (较低)  
 - **功能**: 基于两个交易所价差进行自适应套利
 
@@ -427,7 +429,50 @@ async def get_order_book_depth(self, contract_id: str, limit: int = 15) -> Dict 
 
 1. 继承 `HedgeBotAbc` 创建新的交易所实现类
 2. 实现必要的抽象方法: `primary_exchange_name()`, `primary_client_init()` 等  
-3. 在 `hedge_mode_v1.py` 中添加对应的导入和调用逻辑
+3. 在 `hedge_mode.py` 中添加对应的导入和调用逻辑
+
+### 策略配置方法
+
+#### 在对冲机器人中配置交易策略
+
+每个对冲交易所实现都需要在 `__init__` 方法中配置交易策略组合。以 `hedge_mode_edgex.py` 为例：
+
+```python
+class HedgeBot(HedgeBotAbc):
+    """EdgeX对冲机器人实现"""
+
+    def __init__(self, ticker: str, order_quantity: Decimal, fill_timeout: int = 5, iterations: int = 20):
+        super().__init__(ticker, order_quantity, fill_timeout, iterations)
+        
+        # 配置交易策略组合
+        self.hedge_strategies = [
+            LiquidRiskStrategy(priority=100),      # 清算风险控制 - 最高优先级
+            PriceVolatilityStrategy(priority=15),  # 价格波动控制 - 高优先级  
+            TimingStrategy(priority=20),           # 时间控制策略 - 中等优先级
+            SpreadStrategy(priority=10)            # 价差套利策略 - 较低优先级
+        ]
+```
+
+#### 策略配置说明
+
+| 配置项 | 说明 | 示例 |
+|--------|------|------|
+| **策略导入** | 导入所需的策略类 | `from hedge_v1.strategy.timing_strategy import TimingStrategy` |
+| **策略实例化** | 创建策略实例并设置优先级 | `TimingStrategy(priority=20)` |
+| **优先级设置** | 数值越大优先级越高 | 100(最高) > 80(较高) > 20(中等) > 10(较低) |
+| **策略顺序** | 按优先级从高到低排列 | 建议按优先级降序排列便于理解 |
+
+#### 推荐策略组合配置
+
+**标准配置** (适用于大部分场景):
+```python
+self.hedge_strategies = [
+    LiquidRiskStrategy(priority=100),       # 必需 - 资金安全保障
+    PriceVolatilityStrategy(priority=80),   # 推荐 - 市场波动控制  
+    TimingStrategy(priority=20),            # 推荐 - 交易频率控制
+    SpreadStrategy(priority=10)             # 核心 - 价差套利策略
+]
+```
 
 ### 自定义策略
 
