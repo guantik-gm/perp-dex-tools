@@ -1168,18 +1168,20 @@ class HedgeBotAbc(ABC):
 
     async def _combine_lighter_pnl(self) -> Optional[Decimal]:
         """计算 Lighter 交易所的 PnL"""
+        lighter_pnl = None
         try:
             # 优先尝试通过 lighter proxy 获取 PnL
             if self.lighter:
                 lighter_pnl = await self.lighter.get_ticker_position_pnl()
                 lighter_pnl = lighter_pnl / Decimal(100)
                 self.logger.info(f"✅ Lighter PnL from API: {lighter_pnl}")
-                return lighter_pnl
         except Exception as e:
             self.logger.warning(f"⚠️ 无法获取 Lighter PnL from API: {e}")
         
-        self.logger.info(f"获取 Lighter PnL 数据失败，使用订单价格进行计算")
-        return self.position_data.calc_lighter_pnl()
+        if not lighter_pnl: 
+            self.logger.info(f"获取 Lighter PnL 数据失败，使用订单价格进行计算")
+            lighter_pnl = self.position_data.calc_lighter_pnl()
+        return lighter_pnl
 
     async def _update_pnl_data_after_close(self):
         """平仓后更新所有 PnL 相关数据"""
