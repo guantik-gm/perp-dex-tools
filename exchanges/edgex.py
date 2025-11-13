@@ -5,7 +5,9 @@ EdgeX exchange client implementation.
 import os
 import asyncio
 import json
+import time
 import traceback
+import websockets
 from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 from edgex_sdk import Client, OrderSide, WebSocketManager, CancelOrderParams, GetOrderBookDepthParams, GetActiveOrderParams
@@ -55,6 +57,19 @@ class EdgeXClient(BaseExchangeClient):
         self._ws_disconnected = asyncio.Event()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
+        # --- order book state (WebSocket) ---
+        self.order_book = {"bids": {}, "asks": {}}
+        self.best_bid = None
+        self.best_ask = None
+        self.order_book_ready = False
+        self.order_book_start_version = None
+        self.order_book_end_version = None
+        self.order_book_lock = asyncio.Lock()
+        self.last_order_book_update_time = time.time()
+        self._public_ws_task: Optional[asyncio.Task] = None
+        self._public_ws_stop = asyncio.Event()
+        self._public_ws_disconnected = asyncio.Event()
+
     def _validate_config(self) -> None:
         """Validate EdgeX configuration."""
         required_env_vars = ['EDGEX_ACCOUNT_ID', 'EDGEX_STARK_PRIVATE_KEY']
@@ -84,6 +99,10 @@ class EdgeXClient(BaseExchangeClient):
 
         if not self._ws_task or self._ws_task.done():
             self._ws_task = asyncio.create_task(self._run_private_ws())
+
+        # Start public WebSocket for order book data
+        if not self._public_ws_task or self._public_ws_task.done():
+            self._public_ws_task = asyncio.create_task(self._run_public_ws())
 
         # give first connection a moment (optional)
         await asyncio.sleep(0.5)
@@ -130,12 +149,73 @@ class EdgeXClient(BaseExchangeClient):
         except Exception:
             pass
 
+    async def _run_public_ws(self):
+        """Manage public WebSocket connection for order book data with auto-reconnect."""
+        # Wait for contract_id to be initialized
+        while not self.config.contract_id and not self._public_ws_stop.is_set():
+            await asyncio.sleep(0.5)
+
+        if self._public_ws_stop.is_set():
+            return
+
+        self.logger.log(f"[Public WS] Starting with contract_id: {self.config.contract_id}", "INFO")
+
+        backoff = 1.0
+        while not self._public_ws_stop.is_set():
+            try:
+                # Connect to public WebSocket
+                async with websockets.connect(self.ws_url) as ws:
+                    self.logger.log("[Public WS] Connected to order book stream", "INFO")
+                    backoff = 1.0
+
+                    # Subscribe to order book depth
+                    # Use 200 levels for better depth analysis
+                    channel = f"depth.{self.config.contract_id}.200"
+                    subscribe_msg = {
+                        "type": "subscribe",
+                        "channel": channel
+                    }
+                    await ws.send(json.dumps(subscribe_msg))
+                    self.logger.log(f"[Public WS] Subscribed to {channel}", "INFO")
+
+                    # Message processing loop
+                    while not self._public_ws_stop.is_set():
+                        try:
+                            # Set a timeout to periodically check stop flag
+                            message = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                            await self._handle_order_book_message(message)
+                        except asyncio.TimeoutError:
+                            # Check for data freshness
+                            data_age = time.time() - self.last_order_book_update_time
+                            if data_age >= 10:
+                                self.logger.log(f"[Public WS] Order book data stale ({data_age:.1f}s), reconnecting", "WARNING")
+                                self.order_book_ready = False
+                                break
+                            continue
+                        except websockets.exceptions.ConnectionClosed:
+                            self.logger.log("[Public WS] Connection closed, reconnecting", "WARNING")
+                            self.order_book_ready = False
+                            break
+
+            except Exception as e:
+                self.logger.log(f"[Public WS] Connection error: {e}", "ERROR")
+                self.order_book_ready = False
+
+            # Exponential backoff before reconnecting
+            if not self._public_ws_stop.is_set():
+                await asyncio.sleep(backoff)
+                backoff = min(60.0, backoff * 2)
+
     async def disconnect(self) -> None:
         """Disconnect from EdgeX."""
         try:
             self._ws_stop.set()
+            self._public_ws_stop.set()
+
             if self._ws_task:
                 await self._ws_task
+            if self._public_ws_task:
+                await self._public_ws_task
         except Exception:
             pass
 
@@ -154,6 +234,265 @@ class EdgeXClient(BaseExchangeClient):
     def get_exchange_name(self) -> str:
         """Get the exchange name."""
         return "edgex"
+
+    # ---------------------------
+    # Order Book Management
+    # ---------------------------
+
+    async def _handle_order_book_message(self, message: str):
+        """Handle order book messages from public WebSocket."""
+        try:
+            data = json.loads(message)
+            msg_type = data.get("type")
+
+            # Handle subscription confirmation
+            if msg_type == "subscribed":
+                channel = data.get("channel", "")
+                self.logger.log(f"[Public WS] Subscription confirmed: {channel}", "INFO")
+                return
+
+            # Handle order book snapshot (initial full data)
+            if msg_type == "depth" and data.get("depthType") == "SNAPSHOT":
+                await self._handle_order_book_snapshot(data)
+
+            # Handle order book updates (incremental changes)
+            elif msg_type == "depth" and data.get("depthType") == "CHANGED":
+                await self._handle_order_book_update(data)
+
+        except json.JSONDecodeError as e:
+            self.logger.log(f"[Public WS] Failed to parse message: {e}", "ERROR")
+        except Exception as e:
+            self.logger.log(f"[Public WS] Error handling message: {e}", "ERROR")
+
+    async def _handle_order_book_snapshot(self, data: Dict[str, Any]):
+        """Handle initial order book snapshot."""
+        try:
+            async with self.order_book_lock:
+                # Clear existing order book
+                self.order_book["bids"].clear()
+                self.order_book["asks"].clear()
+
+                # Extract version info
+                self.order_book_start_version = data.get("startVersion")
+                self.order_book_end_version = data.get("endVersion")
+
+                # Process bids and asks
+                bids = data.get("bids", [])
+                asks = data.get("asks", [])
+
+                for bid in bids:
+                    if isinstance(bid, list) and len(bid) >= 2:
+                        price = Decimal(str(bid[0]))
+                        size = Decimal(str(bid[1]))
+                        if size > 0:
+                            self.order_book["bids"][price] = size
+
+                for ask in asks:
+                    if isinstance(ask, list) and len(ask) >= 2:
+                        price = Decimal(str(ask[0]))
+                        size = Decimal(str(ask[1]))
+                        if size > 0:
+                            self.order_book["asks"][price] = size
+
+                # Update best bid/ask
+                self._update_best_prices()
+
+                # Mark order book as ready
+                self.order_book_ready = True
+                self.last_order_book_update_time = time.time()
+
+                self.logger.log(
+                    f"[Public WS] Order book snapshot loaded: {len(self.order_book['bids'])} bids, "
+                    f"{len(self.order_book['asks'])} asks, version: {self.order_book_end_version}",
+                    "INFO"
+                )
+
+        except Exception as e:
+            self.logger.log(f"[Public WS] Error processing snapshot: {e}", "ERROR")
+            self.order_book_ready = False
+
+    async def _handle_order_book_update(self, data: Dict[str, Any]):
+        """Handle incremental order book updates."""
+        try:
+            async with self.order_book_lock:
+                # Validate version sequence
+                new_start_version = data.get("startVersion")
+                new_end_version = data.get("endVersion")
+
+                if self.order_book_end_version is not None and new_start_version != self.order_book_end_version:
+                    self.logger.log(
+                        f"[Public WS] Version gap detected: expected {self.order_book_end_version}, "
+                        f"got {new_start_version}. Waiting for snapshot...",
+                        "WARNING"
+                    )
+                    self.order_book_ready = False
+                    return
+
+                # Process bid updates
+                bids = data.get("bids", [])
+                for bid in bids:
+                    if isinstance(bid, list) and len(bid) >= 2:
+                        price = Decimal(str(bid[0]))
+                        size = Decimal(str(bid[1]))
+                        if size > 0:
+                            self.order_book["bids"][price] = size
+                        else:
+                            # Remove price level if size is 0
+                            self.order_book["bids"].pop(price, None)
+
+                # Process ask updates
+                asks = data.get("asks", [])
+                for ask in asks:
+                    if isinstance(ask, list) and len(ask) >= 2:
+                        price = Decimal(str(ask[0]))
+                        size = Decimal(str(ask[1]))
+                        if size > 0:
+                            self.order_book["asks"][price] = size
+                        else:
+                            # Remove price level if size is 0
+                            self.order_book["asks"].pop(price, None)
+
+                # Update version tracking
+                self.order_book_end_version = new_end_version
+
+                # Update best bid/ask
+                self._update_best_prices()
+
+                # Update timestamp
+                self.last_order_book_update_time = time.time()
+
+        except Exception as e:
+            self.logger.log(f"[Public WS] Error processing update: {e}", "ERROR")
+
+    def _update_best_prices(self):
+        """Update best bid and ask prices from order book."""
+        try:
+            if self.order_book["bids"]:
+                self.best_bid = max(self.order_book["bids"].keys())
+            else:
+                self.best_bid = None
+
+            if self.order_book["asks"]:
+                self.best_ask = min(self.order_book["asks"].keys())
+            else:
+                self.best_ask = None
+        except Exception as e:
+            self.logger.log(f"Error updating best prices: {e}", "ERROR")
+
+    def get_order_book_levels(self, side: str, limit: int = 50) -> List[Dict[str, Decimal]]:
+        """
+        Get order book levels for a specific side.
+
+        Args:
+            side: 'bids' or 'asks'
+            limit: Maximum number of levels to return
+
+        Returns:
+            List of {price, size} dictionaries, sorted by best price first
+        """
+        if not self.order_book_ready:
+            return []
+
+        try:
+            if side not in ['bids', 'asks']:
+                self.logger.log(f"Invalid side: {side}", "ERROR")
+                return []
+
+            # Get price levels sorted by best price first
+            prices = sorted(
+                self.order_book[side].keys(),
+                reverse=(side == 'bids')  # Descending for bids, ascending for asks
+            )
+
+            # Build result list
+            levels = []
+            for price in prices[:limit]:
+                levels.append({
+                    'price': price,
+                    'size': self.order_book[side][price]
+                })
+
+            return levels
+
+        except Exception as e:
+            self.logger.log(f"Error getting order book levels: {e}", "ERROR")
+            return []
+
+    def get_best_prices(self) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+        """Get best bid and ask prices from WebSocket order book."""
+        if not self.order_book_ready:
+            return None, None
+        return self.best_bid, self.best_ask
+
+    def calculate_execution_price(self, side: str, quantity: Decimal) -> Optional[Decimal]:
+        """
+        Calculate the volume-weighted average execution price for a taker order.
+
+        Args:
+            side: 'buy' or 'sell'
+            quantity: Order quantity
+
+        Returns:
+            Weighted average execution price, or None if insufficient liquidity
+        """
+        if not self.order_book_ready:
+            self.logger.log("Order book not ready for execution price calculation", "WARNING")
+            return None
+
+        try:
+            # Determine which side of the order book to use
+            # For buy orders, we take from asks; for sell orders, we take from bids
+            book_side = 'asks' if side == 'buy' else 'bids'
+            levels = self.get_order_book_levels(book_side, limit=100)
+
+            if not levels:
+                self.logger.log(f"No liquidity available for {side} order", "WARNING")
+                return None
+
+            remaining_quantity = quantity
+            total_cost = Decimal('0')
+            total_filled = Decimal('0')
+
+            # Walk through the order book levels
+            for level in levels:
+                if remaining_quantity <= 0:
+                    break
+
+                level_price = level['price']
+                level_size = level['size']
+
+                # Calculate how much we can fill at this level
+                fill_quantity = min(remaining_quantity, level_size)
+
+                # Update totals
+                total_cost += fill_quantity * level_price
+                total_filled += fill_quantity
+                remaining_quantity -= fill_quantity
+
+            # Check if we have sufficient liquidity
+            if remaining_quantity > 0:
+                self.logger.log(
+                    f"Insufficient liquidity: requested {quantity}, available {total_filled}",
+                    "WARNING"
+                )
+                # Return None or partial execution price based on preference
+                # Here we return the partial execution price
+                if total_filled == 0:
+                    return None
+
+            # Calculate volume-weighted average price
+            weighted_avg_price = total_cost / total_filled
+            return weighted_avg_price.quantize(Decimal('0.000001'))
+
+        except Exception as e:
+            self.logger.log(f"Error calculating execution price: {e}", "ERROR")
+            return None
+
+    def get_mid_price_from_orderbook(self) -> Optional[Decimal]:
+        """Get mid price from WebSocket order book."""
+        if not self.order_book_ready or self.best_bid is None or self.best_ask is None:
+            return None
+        return (self.best_bid + self.best_ask) / Decimal('2')
 
     # ---------------------------
     # WS Handlers
