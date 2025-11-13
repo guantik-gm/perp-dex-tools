@@ -349,16 +349,14 @@ class SpreadStrategy(HedgeStrategy):
     
     def after_open_hedge_position(self, hedge_bot):
         # 如果开仓策略不是价差，那么这里的值会是空的，can_close将会回退到传统价差判断的方式
-        order_handler = hedge_bot.get_current_order_handler()
-        self.primary_open_price = order_handler.current_primary_price
-        self.lighter_open_price = order_handler.current_lighter_price
+        self.primary_open_price = hedge_bot.position_data.current_primary_open_price
+        self.lighter_open_price = hedge_bot.position_data.current_lighter_open_price
         # 修复: 确保两个价格都是Decimal类型再进行运算
         self.actual_open_spread = abs(Decimal(str(self.primary_open_price)) - Decimal(str(self.lighter_open_price)))
     
     def after_close_hedge_position(self, hedge_bot):
-        order_handler = hedge_bot.get_current_order_handler()
-        self.primary_close_price = order_handler.current_primary_price
-        self.lighter_close_price = order_handler.current_lighter_price
+        self.primary_close_price = hedge_bot.position_data.current_primary_close_price
+        self.lighter_close_price = hedge_bot.position_data.current_lighter_close_price
         # 修复: 使用平仓价格计算平仓价差，并确保类型一致
         self.actual_close_spread = abs(Decimal(str(self.primary_close_price)) - Decimal(str(self.lighter_close_price)))
 

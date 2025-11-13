@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import pytz
 from datetime import datetime
 from abc import ABC, abstractmethod
@@ -12,7 +12,7 @@ import argparse
 import traceback
 import csv
 from decimal import Decimal
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import sys
 import os
@@ -31,6 +31,161 @@ class HedgeOrderResult:
     RETRY_STRATEGY = "retry_strategy"  # 需要重新进行策略判断
 
 
+@dataclass
+class HedgePositionData:
+    """对冲交易仓位综合数据类 - 统一管理所有持仓和订单数据"""
+    
+    # 当前订单信息
+    # 交易方向
+    current_primary_open_side: Optional[str] = None
+    # 交易价格
+    current_primary_open_price: Optional[Decimal] = None
+    # 交易数量（币本位）
+    current_primary_open_quantity: Optional[Decimal] = None
+    current_primary_close_side: Optional[str] = None
+    current_primary_close_price: Optional[Decimal] = None
+    current_primary_close_quantity: Optional[Decimal] = None
+    # 持有仓位（币本位）
+    current_primary_position: Decimal = Decimal('0')
+    
+    current_lighter_open_side: Optional[str] = None
+    current_lighter_open_price: Optional[Decimal] = None
+    current_lighter_open_quantity: Optional[Decimal] = None
+    current_lighter_close_side: Optional[str] = None
+    current_lighter_close_price: Optional[Decimal] = None
+    current_lighter_close_quantity: Optional[Decimal] = None
+    current_lighter_position: Decimal = Decimal('0')
+    
+    triggered_open_strategies = None
+    triggered_close_strategies = None
+    
+    # 交易本金（u本位）
+    current_primary_capital: Decimal = Decimal('0')
+    current_lighter_capital: Decimal = Decimal('0')
+    current_capital: Decimal = Decimal('0')
+    
+    # 当前交易 PnL 数据
+    current_primary_pnl: Decimal = Decimal('0')
+    current_lighter_pnl: Optional[Decimal] = None
+    current_pnl: Optional[Decimal] = None
+    # 交易量（u本位）
+    current_trade_volume: Decimal = Decimal('0')
+    # 收益率，基于交易本金
+    current_return_rate: Optional[Decimal] = None
+    # 磨损率，基于交易量
+    current_wear_rate: Optional[Decimal] = None
+    
+    # 累计统计
+    total_trade_count: int = 0
+    total_trade_volume: Decimal = Decimal('0')
+    total_pnl: Decimal = Decimal('0')
+    pnl_history: list = field(default_factory=list)
+    wear_rate_history: list = field(default_factory=list)
+    return_rate_history: list = field(default_factory=list)
+    
+    def calc_primary_fee_cost(self, fee_rate):
+        fee_rate = Decimal(str(fee_rate))
+        # 添加数据完整性检查
+        if not all([self.current_primary_open_price, self.current_primary_open_quantity,
+                   self.current_primary_close_price, self.current_primary_close_quantity]):
+            raise ValueError("Cannot calculate primary fee cost: incomplete trade data")
+            
+        primary_open_fee = Decimal(str(self.current_primary_open_price)) * Decimal(str(self.current_primary_open_quantity)) * fee_rate
+        primary_close_fee = Decimal(str(self.current_primary_close_price)) * Decimal(str(self.current_primary_close_quantity)) * fee_rate
+        return primary_open_fee, primary_close_fee
+    
+    def calc_primary_pnl(self):
+        # 添加数据完整性检查
+        if not all([self.current_primary_open_price, self.current_primary_close_price, 
+                   self.current_primary_open_quantity, self.current_primary_open_side]):
+            raise ValueError("Cannot calculate Primary PnL: incomplete trade data")
+            
+        open_price = Decimal(str(self.current_primary_open_price))
+        close_price = Decimal(str(self.current_primary_close_price))
+        open_side = self.current_primary_open_side
+        quantity = Decimal(str(self.current_primary_open_quantity))
+        
+        if open_side == 'buy':
+            primary_pnl = (close_price - open_price) * quantity
+        else:
+            primary_pnl = (open_price - close_price) * quantity
+        return primary_pnl
+    
+    def calc_lighter_pnl(self):
+        # 添加数据完整性检查
+        if not all([self.current_lighter_open_price, self.current_lighter_close_price,
+                   self.current_lighter_open_quantity, self.current_lighter_open_side]):
+            raise ValueError("Cannot calculate Lighter PnL: incomplete trade data")
+            
+        open_price = Decimal(str(self.current_lighter_open_price))
+        close_price = Decimal(str(self.current_lighter_close_price))
+        open_side = self.current_lighter_open_side
+        quantity = Decimal(str(self.current_lighter_open_quantity))
+        
+        if open_side == 'buy':
+            lighter_pnl = (close_price - open_price) * quantity
+        else:
+            lighter_pnl = (open_price - close_price) * quantity
+            
+        return lighter_pnl
+    
+    def calc_trade_volume(self):
+        # 添加数据完整性检查
+        if not all([self.current_primary_open_price, self.current_primary_open_quantity,
+                   self.current_primary_close_price, self.current_primary_close_quantity]):
+            raise ValueError("Cannot calculate trade volume: incomplete trade data")
+            
+        open_volume = Decimal(str(self.current_primary_open_price)) * Decimal(str(self.current_primary_open_quantity))
+        close_volume = Decimal(str(self.current_primary_close_price)) * Decimal(str(self.current_primary_close_quantity))
+        return open_volume + close_volume
+    
+    def add_completed_trade(self):
+        """添加完成的交易到累计统计"""
+        self.total_trade_count += 1
+        self.total_trade_volume += self.current_trade_volume
+        
+        if self.current_pnl is not None:
+            self.total_pnl += self.current_pnl
+            self.pnl_history.append(self.current_pnl)
+        
+        if self.current_return_rate is not None:
+            self.return_rate_history.append(self.current_return_rate)
+        
+        if self.current_wear_rate is not None:
+            self.wear_rate_history.append(self.current_wear_rate)
+    
+    def reset_current_trade(self):
+        """重置当前交易数据（为下一轮交易准备）"""
+        # 重置当前订单信息
+        self.current_primary_open_side = None
+        self.current_primary_open_price = None
+        self.current_primary_open_quantity = None
+        self.current_primary_close_side = None
+        self.current_primary_close_price = None
+        self.current_primary_close_quantity = None
+        self.current_primary_position = Decimal('0')
+        self.current_lighter_open_side = None
+        self.current_lighter_open_price = None
+        self.current_lighter_open_quantity = None
+        self.current_lighter_close_side = None
+        self.current_lighter_close_price = None
+        self.current_lighter_close_quantity = None
+        self.current_lighter_position = Decimal('0')
+        
+        self.triggered_open_strategies = None
+        self.triggered_close_strategies = None
+
+        self.current_primary_capital = Decimal('0')
+        self.current_lighter_capital = Decimal('0')
+        self.current_capital = Decimal('0')
+        self.current_primary_pnl = Decimal('0')
+        self.current_lighter_pnl = None
+        self.current_pnl = None
+        self.current_trade_volume = Decimal('0')
+        self.current_return_rate = None
+        self.current_wear_rate = None
+    
+
 class Config:
     """Simple config class to wrap dictionary for primary client."""
 
@@ -38,14 +193,6 @@ class Config:
         for key, value in config_dict.items():
             setattr(self, key, value)
 
-@dataclass
-class CurrentOrderHandler:
-    current_primary_side: str = None
-    current_primary_price: Decimal = None
-    current_primary_quantity: Decimal = None
-    current_lighter_side: str = None
-    current_lighter_price: Decimal = None
-    current_lighter_quantity: Decimal = None
 
 class HedgeBotAbc(ABC):
     """Trading bot that places post-only orders on primary and hedges with market orders on Lighter."""
@@ -55,8 +202,6 @@ class HedgeBotAbc(ABC):
         self.order_quantity = order_quantity
         self.fill_timeout = fill_timeout
         self.iterations = iterations
-        self.primary_position = Decimal('0')
-        self.lighter_position = Decimal('0')
         self.current_order = {}
 
         # 策略数据共享字典
@@ -67,6 +212,8 @@ class HedgeBotAbc(ABC):
         self.primary_contract_id = None
         self.primary_tick_size = None
         self.primary_order_status = None
+
+        self.position_data = HedgePositionData()
 
         # Initialize CSV file with headers if it doesn't exist
         self._initialize_log_file()
@@ -81,8 +228,8 @@ class HedgeBotAbc(ABC):
             order_quantity=self.order_quantity,
             logger=self.logger,
             primary_exchange_name=self.primary_exchange_name(),
-            hedge_bot_order_handler=self.get_current_order_handler,
-            hedge_bot_fee_rate_handler=self.primary_fee_rate
+            primary_fee_rate=self.primary_fee_rate(),
+            position_data_handler=self.position_data_handler
         )
 
         self.waiting_for_lighter_fill = False
@@ -97,29 +244,8 @@ class HedgeBotAbc(ABC):
         self.hedge_strategies = []
         self.strategy_check_time = 1
 
-        self.current_primary_side = None
-        self.current_primary_price = None
-        self.current_primary_quantity = None
-        self.current_lighter_side = None        
-        self.current_lighter_price = None
-        self.current_lighter_quantity = None
-
-    def get_primary_position(self):
-        return self.primary_position
-    
-    def get_lighter_position(self):
-        return self.lighter_position
-    
-    def get_current_order_handler(self):
-        return CurrentOrderHandler(
-            current_primary_side=self.current_primary_side,
-            current_primary_price=self.current_primary_price,
-            current_primary_quantity=self.current_primary_quantity,
-            current_lighter_side=self.current_lighter_side,
-            current_lighter_price=self.current_lighter_price,
-            current_lighter_quantity=self.current_lighter_quantity
-        )
-
+    def position_data_handler(self):
+        return self.position_data
     def add_strategy(self, strategy):
         """添加策略到策略数组"""
         self.hedge_strategies.append(strategy)
@@ -358,9 +484,9 @@ class HedgeBotAbc(ABC):
                 # Handle the order update
                 if status == 'FILLED' and self.primary_order_status != 'FILLED':
                     if side == 'buy':
-                        self.primary_position += filled_size
+                        self.position_data.current_primary_position += filled_size
                     else:
-                        self.primary_position -= filled_size
+                        self.position_data.current_primary_position -= filled_size
                     self.logger.info(f"[WebSocket] [{order_id}] [{order_type}] [{self.primary_exchange_name()}] [{status}]: {filled_size} @ {price}")
                     self.primary_order_status = status
 
@@ -407,10 +533,18 @@ class HedgeBotAbc(ABC):
 
     def _update_lighter_position(self, position_change: Decimal, filled_price: Decimal, filled_quantity: Decimal):
         """Handle Lighter position change callback."""
-        self.lighter_position += position_change
-        self.logger.info(f"📊 Lighter position updated: {position_change:+} → {self.lighter_position}, filled price: {filled_price}, filled quantity: {filled_quantity}")
-        self.current_lighter_price = filled_price
-        self.current_lighter_quantity = filled_quantity
+        self.position_data.current_lighter_position += position_change
+        self.logger.info(f"📊 Lighter position updated: {position_change:+} → {self.position_data.current_lighter_position}, filled price: {filled_price}, filled quantity: {filled_quantity}")
+        
+        # 检查是否是开仓还是平仓（根据 position_change 和当前状态判断）
+        if self.position_data.current_lighter_open_price is None:
+            # 这是开仓操作
+            self.position_data.current_lighter_open_price = filled_price
+            self.position_data.current_lighter_open_quantity = filled_quantity
+        else:
+            # 这是平仓操作
+            self.position_data.current_lighter_close_price = filled_price
+            self.position_data.current_lighter_close_quantity = filled_quantity
 
     def _set_stop_flag(self, stop: bool):
         self.stop_flag = stop
@@ -566,13 +700,13 @@ class HedgeBotAbc(ABC):
                                     # 这里如果处理了，后续websocket延迟更新还会再执行一次，通过self.primary_order_status判断是否已经被ws更新，同理ws中也通过self.primary_order_status判断是否已经被rest主动更新
                                     if self.primary_order_status != "FILLED":
                                         if cancel_result.side == "buy":
-                                            self.primary_position += cancel_result.filled_size
+                                            self.position_data.current_primary_position += cancel_result.filled_size
                                         else:
-                                            self.primary_position -= cancel_result.filled_size
+                                            self.position_data.current_primary_position -= cancel_result.filled_size
                                         self.primary_order_status = 'FILLED'
                                         self.handle_primary_order_update(order_data)
                                     else:
-                                        self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.primary_position}")
+                                        self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.position_data.current_primary_position}")
                                     return HedgeOrderResult.SUCCESS
                                 else:
                                     # 只有cancel+filled_size为0是真正的取消状态需要重试
@@ -594,13 +728,13 @@ class HedgeBotAbc(ABC):
                                     order_data = {'side': cancel_result.side, 'price': cancel_result.price, 'filled_size': cancel_result.filled_size}
                                     if self.primary_order_status != "FILLED":
                                         if cancel_result.side == "buy":
-                                            self.primary_position += cancel_result.filled_size
+                                            self.position_data.current_primary_position += cancel_result.filled_size
                                         else:
-                                            self.primary_position -= cancel_result.filled_size
+                                            self.position_data.current_primary_position -= cancel_result.filled_size
                                         self.primary_order_status = 'FILLED'
                                         self.handle_primary_order_update(order_data)
                                     else:
-                                        self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.primary_position}")
+                                        self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.position_data.current_primary_position}")
                                     return HedgeOrderResult.SUCCESS
                             # should_cancel说明当前primary下单价格将会改变，重新计算策略条件（比如价差策略）
                             if triggered_strategies_need_to_replace_order or should_cancel:
@@ -636,13 +770,13 @@ class HedgeBotAbc(ABC):
                             self.logger.info(f"订单已全部或部分成交: {order_info.filled_size}, 重置 {self.primary_exchange_name()} 订单状态为 FILLED, 订单信息: {order_info}")
                             if self.primary_order_status != "FILLED":
                                 if order_info.side == "buy":
-                                    self.primary_position += order_info.filled_size
+                                    self.position_data.current_primary_position += order_info.filled_size
                                 else:
-                                    self.primary_position -= order_info.filled_size
+                                    self.position_data.current_primary_position -= order_info.filled_size
                                 self.primary_order_status = 'FILLED'
                                 self.handle_primary_order_update(order_data)
                             else:
-                                self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.primary_position}")
+                                self.logger.info(f"primary order status 可能通过WebSocket回调已经更新为 FILLED, 跳过primary position更新，primary_position: {self.position_data.current_primary_position}")
                             # return也可以不需要，下轮循环直接走FILLED分支
                             return HedgeOrderResult.SUCCESS
                     else:
@@ -664,11 +798,25 @@ class HedgeBotAbc(ABC):
         else:
             lighter_side = 'buy'
 
-        # Store order details for immediate execution
-        self.current_lighter_side = lighter_side
-        self.current_primary_side = side
-        self.current_primary_quantity = filled_size
-        self.current_primary_price = price
+        # 根据当前状态判断是开仓还是平仓
+        is_opening = self.position_data.current_primary_open_side is None
+        
+        if is_opening:
+            # 开仓操作
+            self.position_data.current_primary_open_side = side
+            self.position_data.current_primary_open_price = price
+            self.position_data.current_primary_open_quantity = filled_size
+            
+            # lighter 的开仓价格和数量将在 lighter 填充回调中设置
+            self.position_data.current_lighter_open_side = lighter_side
+        else:
+            # 平仓操作
+            self.position_data.current_primary_close_side = side
+            self.position_data.current_primary_close_price = price
+            self.position_data.current_primary_close_quantity = filled_size
+            
+            self.position_data.current_lighter_close_side = lighter_side
+            # lighter 的平仓价格和数量将在 lighter 回调中设置
 
         self.waiting_for_lighter_fill = True
 
@@ -683,9 +831,9 @@ class HedgeBotAbc(ABC):
             # Check if Primary order filled and we need to place Lighter order
             if self.waiting_for_lighter_fill:
                 result = await self.lighter.place_lighter_market_order(
-                    self.current_lighter_side,
-                    self.current_primary_quantity,
-                    self.current_primary_price
+                    self.position_data.current_lighter_open_side,
+                    self.position_data.current_primary_open_quantity,
+                    self.position_data.current_primary_open_price
                 )
                 # lighter订单失败重试机制
                 self.order_execution_complete = result is not None
@@ -731,12 +879,12 @@ class HedgeBotAbc(ABC):
 
     def _determine_close_side_and_quantity(self) -> tuple:
         """确定平仓方向和数量，返回(side, quantity)或(None, None)表示不需要平仓"""
-        if self.primary_position == 0:
+        if self.position_data.current_primary_position == 0:
             return None, None
-        elif self.primary_position > 0:
-            return 'sell', abs(self.primary_position)
+        elif self.position_data.current_primary_position > 0:
+            return 'sell', abs(self.position_data.current_primary_position)
         else:
-            return 'buy', abs(self.primary_position)
+            return 'buy', abs(self.position_data.current_primary_position)
     
     async def trading_loop(self):
         """Main trading loop implementing the new strategy."""
@@ -751,16 +899,19 @@ class HedgeBotAbc(ABC):
             self.logger.info("-----------------------------------------------")
             self.logger.info(f"🔄 Trading loop iteration {iterations}")
             self.logger.info("-----------------------------------------------")
+            
+            # 每轮交易开始前重置当前交易数据
+            self.position_data.reset_current_trade()
 
             # 执行前前确认lighter的order_book已经就绪，否则lighter无法开仓
             while not self.lighter.lighter_order_book_ready:
                 self.logger.error(f"lighter's order book not ready, wait for order book data to continue")
                 await asyncio.sleep(10)
             
-            self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
+            self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.position_data.current_primary_position} | Lighter position: {self.position_data.current_lighter_position}")
 
-            if abs(self.primary_position + self.lighter_position) > self.order_quantity * 2:
-                self.logger.error(f"❌ Position diff is too large: {self.primary_position + self.lighter_position}")
+            if abs(self.position_data.current_primary_position + self.position_data.current_lighter_position) > self.order_quantity * 2:
+                self.logger.error(f"❌ Position diff is too large: {self.position_data.current_primary_position + self.position_data.current_lighter_position}")
                 break
 
             open_side = 'buy'  # 默认值
@@ -804,6 +955,10 @@ class HedgeBotAbc(ABC):
             if not success:
                 break
             
+            # 对冲仓位完成后立即更新position_data以便后续流程使用
+            self.position_data.triggered_open_strategies = triggered_open_strategies
+            self._update_pnl_capital_after_open()            
+            
             for strategy in triggered_open_strategies:
                 strategy.after_open_hedge_position(self)
 
@@ -813,15 +968,6 @@ class HedgeBotAbc(ABC):
                     # 传递触发的策略给monitor
                     await self.monitor.send_position_open_notification(f"{iterations}/{self.iterations}", open_side, triggered_open_strategies)
                     
-                    # 启动状态监控任务
-                    self.monitor.start_status_monitor(
-                        lambda: self.get_primary_position,
-                        lambda: self.get_lighter_position, 
-                        triggered_open_strategies,
-                        self.primary_client,
-                        self.lighter
-                    )
-                
             except Exception as e:
                 self.logger.error(f"Failed to send open notification: {e}")
 
@@ -834,14 +980,14 @@ class HedgeBotAbc(ABC):
             
 
             # Step 2: 第一次平仓（添加重试逻辑）
-            self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
+            self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.position_data.current_primary_position} | Lighter position: {self.position_data.current_lighter_position}")
             
             # 检查对冲状态：两个交易所仓位总和应该接近零（允许小误差）
-            position_sum = self.primary_position + self.lighter_position
+            position_sum = self.position_data.current_primary_position + self.position_data.current_lighter_position
             position_tolerance = self.order_quantity * Decimal('0.005')  # 允许0.5%的误差
             
             if abs(position_sum) > position_tolerance:
-                error_msg = f"Position not properly hedged! {self.primary_exchange_name()}: {self.primary_position}, Lighter: {self.lighter_position}, Sum: {position_sum} (tolerance: ±{position_tolerance})"
+                error_msg = f"Position not properly hedged! {self.primary_exchange_name()}: {self.position_data.current_primary_position}, Lighter: {self.position_data.current_lighter_position}, Sum: {position_sum} (tolerance: ±{position_tolerance})"
                 self.logger.error(error_msg)
                 await self.monitor.send_error_notification(error=None, context=error_msg)
                 break
@@ -853,7 +999,7 @@ class HedgeBotAbc(ABC):
                     break
                 
                 # position可能为负，需要绝对值以兼容原有的self.order_quantity
-                success, need_retry_strategy = await self._execute_hedge_position(close_side, abs(self.primary_position), triggered_close_strategies)
+                success, need_retry_strategy = await self._execute_hedge_position(close_side, abs(self.position_data.current_primary_position), triggered_close_strategies)
                 
                 if success:
                     break  # 成功，继续后续流程
@@ -873,11 +1019,12 @@ class HedgeBotAbc(ABC):
             if not success:
                 break
             
+            self.position_data.triggered_close_strategies = triggered_close_strategies
             for strategy in triggered_close_strategies:
                 strategy.after_close_hedge_position(self)
 
             # Step 3: 剩余平仓(无需重试策略)
-            self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.primary_position} | Lighter position: {self.lighter_position}")
+            self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.position_data.current_primary_position} | Lighter position: {self.position_data.current_lighter_position}")
             final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
             if final_close_side:
                 success = False
@@ -906,6 +1053,9 @@ class HedgeBotAbc(ABC):
             if not success:
                 break
 
+            # 平仓完成后更新 PnL 数据
+            await self._update_pnl_data_after_close()
+
             # 平仓完成后发送通知并停止监控
             try:
                 if triggered_close_strategies:
@@ -917,9 +1067,6 @@ class HedgeBotAbc(ABC):
                         primary_client=self.primary_client, 
                         lighter_proxy=self.lighter
                     )
-                
-                # 停止状态监控任务
-                # self.monitor.stop_status_monitor()
                 
             except Exception as e:
                 self.logger.error(f"Failed to send close notification: {e}")
@@ -950,13 +1097,94 @@ class HedgeBotAbc(ABC):
         finally:
             self.logger.info("🔄 Cleaning up...")
             
-            # 停止状态监控任务
-            self.monitor.stop_status_monitor()
-            
             # 发送系统停止通知
-            await self.monitor.send_shutdown_notification(self.primary_position, self.lighter_position)
+            await self.monitor.send_shutdown_notification(self.position_data.current_primary_position, self.position_data.current_lighter_position)
                 
             self.shutdown()
+
+    async def _combine_primary_pnl(self) -> Decimal:
+        """计算 Primary 交易所的 PnL（包含手续费）"""
+        # 计算手续费
+        primary_open_fee, primary_close_fee = self.position_data.calc_primary_fee_cost(self.primary_fee_rate())
+        primary_pnl = None
+        try:
+            # 优先尝试通过交易所 API 获取 PnL
+            if self.primary_client:
+                primary_pnl = await self.primary_client.get_ticker_position_pnl()
+                primary_pnl = primary_pnl / Decimal(100)
+                self.logger.info(f"✅ {self.primary_exchange_name()} PnL from API: {primary_pnl}")
+        except Exception as e:
+            self.logger.warning(f"⚠️ 无法获取 Primary PnL from API: {e}")
+       
+        if not primary_pnl: 
+            # 如果 API 获取失败，使用订单价格计算
+            self.logger.info(f"获取 {self.primary_exchange_name()} PnL 数据失败，使用订单价格进行计算")
+            primary_pnl = self.position_data.calc_primary_pnl()
+        
+        # 从PnL中减去总手续费
+        primary_pnl -= (primary_open_fee + primary_close_fee)
+        
+        return primary_pnl
+
+    async def _combine_lighter_pnl(self) -> Optional[Decimal]:
+        """计算 Lighter 交易所的 PnL"""
+        try:
+            # 优先尝试通过 lighter proxy 获取 PnL
+            if self.lighter:
+                lighter_pnl = await self.lighter.get_ticker_position_pnl()
+                lighter_pnl = lighter_pnl / Decimal(100)
+                self.logger.info(f"✅ Lighter PnL from API: {lighter_pnl}")
+                return lighter_pnl
+        except Exception as e:
+            self.logger.warning(f"⚠️ 无法获取 Lighter PnL from API: {e}")
+        
+        self.logger.info(f"获取 Lighter PnL 数据失败，使用订单价格进行计算")
+        return self.position_data.calc_lighter_pnl()
+
+    async def _update_pnl_data_after_close(self):
+        """平仓后更新所有 PnL 相关数据"""
+        try:
+            # 计算 PnL 相关数据
+            self.position_data.current_primary_pnl = await self._combine_primary_pnl()
+            self.position_data.current_lighter_pnl = await self._combine_lighter_pnl()
+            self.position_data.current_trade_volume = self.position_data.calc_trade_volume()
+            
+            # 计算衍生指标
+            self.position_data.current_pnl = self.position_data.current_primary_pnl + self.position_data.current_lighter_pnl
+            self.position_data.current_return_rate = (self.position_data.current_pnl / self.position_data.current_capital * 100) if self.position_data.current_capital > 0 else Decimal('0')
+            self.position_data.current_wear_rate = self.position_data.current_pnl / self.position_data.current_trade_volume * 100 if self.position_data.current_trade_volume > 0 else Decimal('0')
+            
+            # 更新累计统计
+            self.position_data.add_completed_trade()
+            
+            self.logger.info(f"✅ PnL 数据已更新: Primary={self.position_data.current_primary_pnl:.4f}, "
+                           f"Lighter={self.position_data.current_lighter_pnl}, Total={self.position_data.current_pnl}, "
+                           f"Return Rate={self.position_data.current_return_rate:.4f}%, Wear Rate={self.position_data.current_wear_rate:.4f}%")
+                           
+        except Exception as e:
+            self.logger.error(f"❌ 更新 PnL 数据失败: {e}")
+            self.logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+
+    def _update_pnl_capital_after_open(self):
+        """开仓后更新本金信息"""
+        try:
+            # 设置 primary 本金
+            if self.position_data.current_primary_open_price and self.position_data.current_primary_open_quantity:
+                self.position_data.current_primary_capital = abs(Decimal(str(self.position_data.current_primary_open_price)) * 
+                                                  Decimal(str(self.position_data.current_primary_open_quantity)) / Decimal('20'))
+                
+            # 设置 lighter 本金（lighter 的开仓信息在较晚时候才有）
+            if self.position_data.current_lighter_open_price and self.position_data.current_lighter_open_quantity:
+                self.position_data.current_lighter_capital = abs(Decimal(str(self.position_data.current_lighter_open_price)) * 
+                                                  Decimal(str(self.position_data.current_lighter_open_quantity)) / Decimal('20'))
+                
+            # 更新总本金
+            self.position_data.current_capital = self.position_data.current_primary_capital + self.position_data.current_lighter_capital      
+            self.logger.info(f"📊 开仓本金已更新: Primary={self.position_data.current_primary_capital:.2f}, "
+                           f"Lighter={self.position_data.current_lighter_capital:.2f}, Total={self.position_data.current_capital:.2f}")
+                           
+        except Exception as e:
+            self.logger.error(f"❌ 更新开仓本金信息失败: {e}")
 
 
 def parse_arguments():

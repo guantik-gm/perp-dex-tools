@@ -104,8 +104,8 @@ class LiquidRiskStrategy(HedgeStrategy):
             self.lighter_liquidation_price = lighter_liquidation
             
             # 获取并记录持仓方向
-            primary_position = hedge_bot.get_primary_position()
-            lighter_position = hedge_bot.get_lighter_position()
+            primary_position = hedge_bot.position_data.current_primary_position
+            lighter_position = hedge_bot.position_data.current_lighter_position
             
             # 根据持仓数量判断持仓方向
             if primary_position > 0:
