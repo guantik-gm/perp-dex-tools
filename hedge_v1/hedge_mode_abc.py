@@ -185,6 +185,32 @@ class HedgePositionData:
         self.current_return_rate = None
         self.current_wear_rate = None
     
+    def __str__(self):
+        """输出JSON字符串格式的所有有值属性"""
+        import json
+        from dataclasses import fields
+        
+        # 收集数据类中有值的字段
+        valued_attrs = {}
+        
+        for field in fields(self):
+            attr_value = getattr(self, field.name)
+            
+            # 只包含有值的属性
+            if attr_value is not None:
+                # 处理不同类型的值
+                if isinstance(attr_value, Decimal):
+                    # Decimal 类型转换为字符串以保持精度
+                    valued_attrs[field.name] = str(attr_value)
+                elif isinstance(attr_value, list):
+                    # 只包含非空列表
+                    if attr_value:
+                        valued_attrs[field.name] = attr_value
+                else:
+                    valued_attrs[field.name] = attr_value
+        
+        return json.dumps(valued_attrs, indent=2, default=str, ensure_ascii=False)
+    
 
 class Config:
     """Simple config class to wrap dictionary for primary client."""
@@ -834,10 +860,12 @@ class HedgeBotAbc(ABC):
         while not self.order_execution_complete and not self.stop_flag:
             # Check if Primary order filled and we need to place Lighter order
             if self.waiting_for_lighter_fill:
+                is_opening = self.position_data.current_lighter_open_price is None
+                lighter_side, quantity, price = self.position_data.current_lighter_open_side, self.position_data.current_primary_open_quantity, self.position_data.current_primary_open_price if is_opening else self.position_data.current_lighter_close_side, self.position_data.current_primary_close_quantity, self.position_data.current_primary_close_price
                 result = await self.lighter.place_lighter_market_order(
-                    self.position_data.current_lighter_open_side,
-                    self.position_data.current_primary_open_quantity,
-                    self.position_data.current_primary_open_price
+                    lighter_side,
+                    quantity,
+                    price
                 )
                 # lighter订单失败重试机制
                 self.order_execution_complete = result is not None
@@ -883,6 +911,7 @@ class HedgeBotAbc(ABC):
 
     def _determine_close_side_and_quantity(self) -> tuple:
         """确定平仓方向和数量，返回(side, quantity)或(None, None)表示不需要平仓"""
+        # todo: lighter没平也要检查
         if self.position_data.current_primary_position == 0:
             return None, None
         elif self.position_data.current_primary_position > 0:
