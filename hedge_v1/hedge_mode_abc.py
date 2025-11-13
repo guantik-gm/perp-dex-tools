@@ -541,10 +541,12 @@ class HedgeBotAbc(ABC):
             # 这是开仓操作
             self.position_data.current_lighter_open_price = filled_price
             self.position_data.current_lighter_open_quantity = filled_quantity
+            self.logger.info(f"lighter open, position_data: {self.position_data}")
         else:
             # 这是平仓操作
             self.position_data.current_lighter_close_price = filled_price
             self.position_data.current_lighter_close_quantity = filled_quantity
+            self.logger.info(f"lighter close, position_data: {self.position_data}")
 
     def _set_stop_flag(self, stop: bool):
         self.stop_flag = stop
@@ -809,6 +811,7 @@ class HedgeBotAbc(ABC):
             
             # lighter 的开仓价格和数量将在 lighter 填充回调中设置
             self.position_data.current_lighter_open_side = lighter_side
+            self.logger.info(f"{self.primary_exchange_name()} open, position_data: {self.position_data}")
         else:
             # 平仓操作
             self.position_data.current_primary_close_side = side
@@ -816,6 +819,7 @@ class HedgeBotAbc(ABC):
             self.position_data.current_primary_close_quantity = filled_size
             
             self.position_data.current_lighter_close_side = lighter_side
+            self.logger.info(f"{self.primary_exchange_name()} close, position_data: {self.position_data}")
             # lighter 的平仓价格和数量将在 lighter 回调中设置
 
         self.waiting_for_lighter_fill = True
@@ -1160,6 +1164,7 @@ class HedgeBotAbc(ABC):
             self.logger.info(f"✅ PnL 数据已更新: Primary={self.position_data.current_primary_pnl:.4f}, "
                            f"Lighter={self.position_data.current_lighter_pnl}, Total={self.position_data.current_pnl}, "
                            f"Return Rate={self.position_data.current_return_rate:.4f}%, Wear Rate={self.position_data.current_wear_rate:.4f}%")
+            self.logger.info(f"update position data after hedge position close, position_data: {self.position_data}")
                            
         except Exception as e:
             self.logger.error(f"❌ 更新 PnL 数据失败: {e}")
@@ -1182,6 +1187,7 @@ class HedgeBotAbc(ABC):
             self.position_data.current_capital = self.position_data.current_primary_capital + self.position_data.current_lighter_capital      
             self.logger.info(f"📊 开仓本金已更新: Primary={self.position_data.current_primary_capital:.2f}, "
                            f"Lighter={self.position_data.current_lighter_capital:.2f}, Total={self.position_data.current_capital:.2f}")
+            self.logger.info(f"update position data after hedge position open, position_data: {self.position_data}")
                            
         except Exception as e:
             self.logger.error(f"❌ 更新开仓本金信息失败: {e}")
