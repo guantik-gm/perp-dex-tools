@@ -209,7 +209,7 @@ class HedgePositionData:
                 else:
                     valued_attrs[field.name] = attr_value
         
-        return json.dumps(valued_attrs, indent=2, default=str, ensure_ascii=False)
+        return json.dumps(valued_attrs, default=str, ensure_ascii=False, separators=(',', ':'))
     
 
 class Config:
@@ -861,7 +861,14 @@ class HedgeBotAbc(ABC):
             # Check if Primary order filled and we need to place Lighter order
             if self.waiting_for_lighter_fill:
                 is_opening = self.position_data.current_lighter_open_price is None
-                lighter_side, quantity, price = self.position_data.current_lighter_open_side, self.position_data.current_primary_open_quantity, self.position_data.current_primary_open_price if is_opening else self.position_data.current_lighter_close_side, self.position_data.current_primary_close_quantity, self.position_data.current_primary_close_price
+                if is_opening:
+                    lighter_side = self.position_data.current_lighter_open_side
+                    quantity = self.position_data.current_primary_open_quantity
+                    price = self.position_data.current_primary_open_price
+                else:
+                    lighter_side = self.position_data.current_lighter_close_side
+                    quantity = self.position_data.current_primary_close_quantity
+                    price = self.position_data.current_primary_close_price
                 result = await self.lighter.place_lighter_market_order(
                     lighter_side,
                     quantity,
