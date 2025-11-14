@@ -253,7 +253,7 @@ class SpreadPnlStrategy(SpreadStrategy):
                 base_msg.append(f"[Primary] 预计平仓价: {primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {primary_close_slippage}, 滑点率: {primary_close_slippage_rate:.6f}%")
             
             # Lighter开仓信息
-            lighter_open_exec_price = data['lighter_close_price']
+            lighter_open_exec_price = getattr(self, 'lighter_open_exec_price', None)
             if lighter_open_exec_price is None:
                 base_msg.append(f"[Lighter] 预计开仓价: {lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: -, 滑点率: -")
             else:
@@ -262,7 +262,7 @@ class SpreadPnlStrategy(SpreadStrategy):
                 base_msg.append(f"[Lighter] 预计开仓价: {lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {lighter_open_slippage}, 滑点率: {lighter_open_slippage_rate:.6f}%")
             
             # Lighter平仓信息
-            lighter_close_exec_price = getattr(self, 'lighter_close_exec_price', None)
+            lighter_close_exec_price = data['lighter_close_price']
             if lighter_close_exec_price is None:
                 base_msg.append(f"[Lighter] 预计平仓价: {lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: -, 滑点率: -")
             else:
