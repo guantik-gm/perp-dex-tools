@@ -236,31 +236,39 @@ class SpreadPnlStrategy(SpreadStrategy):
             base_msg = ["💰 SpreadPnl策略: 基于投入本金收益率平仓"]
             
             primary_open_exec_price = getattr(self, 'primary_open_exec_price', None)
-            primary_open_price = self.primary_open_price
-            primary_open_slippage = abs(primary_open_exec_price - primary_open_price)
-            primary_open_slippage_rate = (primary_open_slippage / primary_open_exec_price * 100) if primary_open_slippage else 0
-            base_msg.append(f"[Primary] 预计开仓价: {primary_open_exec_price}, 实际开仓价: {primary_open_price}, 滑点: {primary_open_slippage}, 滑点率: {primary_open_slippage_rate:.6f}%")
+            if primary_open_exec_price is None:
+                base_msg.append(f"[Primary] 预计开仓价: {primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: -, 滑点率: -")
+            else:
+                primary_open_slippage = abs(primary_open_exec_price - self.primary_open_price)
+                primary_open_slippage_rate = (primary_open_slippage / primary_open_exec_price * 100) if primary_open_slippage else 0
+                base_msg.append(f"[Primary] 预计开仓价: {primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {primary_open_slippage}, 滑点率: {primary_open_slippage_rate:.6f}%")
             
             # Primary平仓信息
             primary_close_exec_price = getattr(self, 'primary_close_exec_price', None)
-            primary_close_price = self.primary_close_price
-            primary_close_slippage = abs(primary_close_exec_price - primary_close_price)
-            primary_close_slippage_rate = (primary_close_slippage / primary_close_exec_price * 100) if primary_close_slippage else 0
-            base_msg.append(f"[Primary] 预计平仓价: {primary_close_exec_price}, 实际平仓价: {primary_close_price}, 滑点: {primary_close_slippage}, 滑点率: {primary_close_slippage_rate:.6f}%")
+            if primary_close_exec_price is None:
+                base_msg.append(f"[Primary] 预计平仓价: {primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: -, 滑点率: -")
+            else:
+                primary_close_slippage = abs(primary_close_exec_price - self.primary_close_price)
+                primary_close_slippage_rate = (primary_close_slippage / primary_close_exec_price * 100) if primary_close_slippage else 0
+                base_msg.append(f"[Primary] 预计平仓价: {primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {primary_close_slippage}, 滑点率: {primary_close_slippage_rate:.6f}%")
             
-            # Lighter开仓信息（从position_data获取）
+            # Lighter开仓信息
             lighter_open_exec_price = getattr(self, 'lighter_open_exec_price', None)
-            lighter_open_price = self.lighter_open_price
-            lighter_open_slippage = abs(lighter_open_exec_price - lighter_open_price)
-            lighter_open_slippage_rate = (lighter_open_slippage / lighter_open_exec_price * 100) if lighter_open_slippage else 0
-            base_msg.append(f"[Lighter] 预计开仓价: {lighter_open_exec_price}, 实际开仓价: {lighter_open_price}, 滑点: {lighter_open_slippage}, 滑点率: {lighter_open_slippage_rate:.6f}%")
+            if lighter_open_exec_price is None:
+                base_msg.append(f"[Lighter] 预计开仓价: {lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: -, 滑点率: -")
+            else:
+                lighter_open_slippage = abs(lighter_open_exec_price - self.lighter_open_price)
+                lighter_open_slippage_rate = (lighter_open_slippage / lighter_open_exec_price * 100) if lighter_open_slippage else 0
+                base_msg.append(f"[Lighter] 预计开仓价: {lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: {lighter_open_slippage}, 滑点率: {lighter_open_slippage_rate:.6f}%")
             
             # Lighter平仓信息
             lighter_close_exec_price = getattr(self, 'lighter_close_exec_price', None)
-            lighter_close_price = self.lighter_close_price
-            lighter_close_slippage = abs(lighter_close_exec_price - lighter_close_price)
-            lighter_close_slippage_rate = (lighter_close_slippage / lighter_close_exec_price * 100) if lighter_close_slippage else 0
-            base_msg.append(f"[Lighter] 预计平仓价: {lighter_close_exec_price}, 实际平仓价: {lighter_close_price}, 滑点: {lighter_close_slippage}, 滑点率: {lighter_close_slippage_rate:.6f}%")
+            if lighter_close_exec_price is None:
+                base_msg.append(f"[Lighter] 预计平仓价: {lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: -, 滑点率: -")
+            else:
+                lighter_close_slippage = abs(lighter_close_exec_price - self.lighter_close_price)
+                lighter_close_slippage_rate = (lighter_close_slippage / lighter_close_exec_price * 100) if lighter_close_slippage else 0
+                base_msg.append(f"[Lighter] 预计平仓价: {lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {lighter_close_slippage}, 滑点率: {lighter_close_slippage_rate:.6f}%")
             
             # 使用position_data中的实际成交价重新计算PnL
             actual_primary_pnl = self._calculate_side_pnl(

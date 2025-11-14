@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import time
 import asyncio
 import random
+import traceback
 from typing import Dict, Any, List
 from decimal import Decimal
 from enum import Enum
@@ -68,9 +69,18 @@ class HedgeStrategy(ABC):
         try:
             msgs.extend(self._get_msgs())
         except Exception as e:
+            # 获取完整的异常堆栈信息
+            error_traceback = traceback.format_exc()
+            error_msg = f"{self.name} get msgs error: {e}\n堆栈信息:\n{error_traceback}"
+            
             if hasattr(self, "logger") and self.logger is not None:
-                self.logger.error(f"get msgs error: {e}")
-            return [f"{self.name} get msgs error: {e}"]
+                self.logger.error(error_msg)
+            
+            # 返回包含堆栈信息的错误消息，但格式化为多行便于阅读
+            return [
+                f"{self.name} get msgs error: {e}",
+                f"堆栈信息: {error_traceback.strip()}"
+            ]
         return msgs
     
     def _get_msgs(self) -> List[str]:

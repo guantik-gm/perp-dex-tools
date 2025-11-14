@@ -218,7 +218,6 @@ class HedgeMonitor:
                       f"{strategy_msg}{position_warning}"
             
             result = self.telegram_bot.send_text(close_msg)
-            self.logger.info(f"telegram 消息通知结果: {result}")
             if not result.get('ok'):
                 self.logger.info(f"telegram 通知消息失败: {close_msg}")
             
