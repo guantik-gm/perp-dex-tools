@@ -1,5 +1,8 @@
 # Dev environment
 /backend/db.sqlite3
+.serena
+.claude
+CLAUDE.md
 
 *.csv
 bnbenv
