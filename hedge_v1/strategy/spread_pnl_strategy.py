@@ -46,12 +46,12 @@ class SpreadPnlStrategy(SpreadStrategy):
             
             # 判断收益率是否超过阈值
             if profit_rate >= self.profit_rate_threshold:
-                reason = f"✅ SpreadPnl平仓: 收益率{profit_rate:.4%} >= 阈值{self.profit_rate_threshold:.4%}, " \
-                        f"PnL={total_pnl:.6f}, 本金={capital:.6f}"
+                reason = f"✅ SpreadPnl平仓: 预计收益率{profit_rate:.4%} >= 阈值{self.profit_rate_threshold:.4%}, " \
+                        f"预计PnL={total_pnl:.6f}, 本金={capital:.6f}"
                 self._set_strategy_context(HedgeStrategyResult.TRIGGER, reason)
                 self.projected_pnl_data = pnl_result  # 保存数据用于日志
             else:
-                reason = f"[SpreadPnl策略] 收益率{profit_rate:.4%} < 阈值{self.profit_rate_threshold:.4%}, " \
+                reason = f"[SpreadPnl策略] 预计收益率{profit_rate:.4%} < 阈值{self.profit_rate_threshold:.4%}, " \
                         f"PnL={total_pnl:.6f}"
                 self._set_strategy_context(HedgeStrategyResult.REJECT, reason)
                 
@@ -244,7 +244,7 @@ class SpreadPnlStrategy(SpreadStrategy):
                 base_msg.append(f"[Primary] 预计开仓价: {primary_open_exec_price}, 实际开仓价: {self.primary_open_price}, 滑点: {primary_open_slippage}, 滑点率: {primary_open_slippage_rate:.6f}%")
             
             # Primary平仓信息
-            primary_close_exec_price = getattr(self, 'primary_close_exec_price', None)
+            primary_close_exec_price = data['primary_close_price']
             if primary_close_exec_price is None:
                 base_msg.append(f"[Primary] 预计平仓价: {primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: -, 滑点率: -")
             else:
@@ -253,7 +253,7 @@ class SpreadPnlStrategy(SpreadStrategy):
                 base_msg.append(f"[Primary] 预计平仓价: {primary_close_exec_price}, 实际平仓价: {self.primary_close_price}, 滑点: {primary_close_slippage}, 滑点率: {primary_close_slippage_rate:.6f}%")
             
             # Lighter开仓信息
-            lighter_open_exec_price = getattr(self, 'lighter_open_exec_price', None)
+            lighter_open_exec_price = data['lighter_close_price']
             if lighter_open_exec_price is None:
                 base_msg.append(f"[Lighter] 预计开仓价: {lighter_open_exec_price}, 实际开仓价: {self.lighter_open_price}, 滑点: -, 滑点率: -")
             else:
@@ -295,12 +295,10 @@ class SpreadPnlStrategy(SpreadStrategy):
             base_msg.append(f"[Primary] 预计PnL: {predicted_primary_net:.6f}({data['primary_pnl']:.6f}-{data['close_fee']:.6f}), 实际PnL: {actual_primary_net:.6f}({actual_primary_pnl:.6f}-{actual_close_fee:.6f})")
             
             # Lighter PnL比较
-            lighter_diff_pct = ((actual_lighter_pnl - data['lighter_pnl']) / data['lighter_pnl'] * 100) if data['lighter_pnl'] != 0 else 0
-            base_msg.append(f"[Lighter] 预计PnL: {data['lighter_pnl']:.6f}, 实际PnL: {actual_lighter_pnl:.6f}, 差异: {lighter_diff_pct:.4f}%")
+            base_msg.append(f"[Lighter] 预计PnL: {data['lighter_pnl']:.6f}, 实际PnL: {actual_lighter_pnl:.6f}")
             
             # 总计PnL比较
-            total_diff_pct = ((actual_total_pnl - data['total_pnl']) / data['total_pnl'] * 100) if data['total_pnl'] != 0 else 0
-            base_msg.append(f"[总计] 预计净PnL: {data['total_pnl']:.6f}, 实际净PnL: {actual_total_pnl:.6f}, 差异: {total_diff_pct:.4f}%")
+            base_msg.append(f"[总计] 预计净PnL: {data['total_pnl']:.6f}, 实际净PnL: {actual_total_pnl:.6f}")
             
             # 收益率比较
             actual_profit_rate = actual_total_pnl / data['capital'] if data['capital'] > 0 else 0
