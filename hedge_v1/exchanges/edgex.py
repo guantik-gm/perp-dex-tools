@@ -643,6 +643,8 @@ class EdgeXClient(BaseExchangeClient):
         position = await self.get_ticker_position()
         if position is None:
             raise ValueError("No position found for position")
+        if not Decimal(position["avgEntryPrice"]):
+            return None
         # unrealizePnl, termRealizePnl
         size = Decimal(position["positionValue"]) / Decimal(position["avgEntryPrice"])
         return size.quantize(Decimal('0.0001'))

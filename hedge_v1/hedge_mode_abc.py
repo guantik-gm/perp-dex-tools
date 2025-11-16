@@ -932,6 +932,12 @@ class HedgeBotAbc(ABC):
     async def _get_current_position_size_from_exchange(self):
         primary_position_size = await self.primary_client.get_ticker_position_size()
         lighter_position_size = await self.lighter.get_ticker_position_size()
+        if primary_position_size is None:
+            primary_position_size = self.position_data.current_primary_position
+            self.logger.warn(f"get position size error from {self.primary_exchange_name()}, use position_data.current_primary_position")
+        if lighter_position_size is None:
+            lighter_position_size = self.position_data.current_lighter_position
+            self.logger.warn(f"get position size error from Lighter, use position_data.current_lighter_position")
         return primary_position_size, lighter_position_size
     
     async def trading_loop(self):
