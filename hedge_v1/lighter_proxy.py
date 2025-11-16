@@ -776,6 +776,13 @@ class LighterProxy:
             raise ValueError("No position found for position value")
         # unrealized_pnl, realized_pnl
         return Decimal(position.position_value)
+    
+    async def get_ticker_position_size(self) -> Decimal:
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for position value")
+        # unrealized_pnl, realized_pnl
+        return Decimal(position.position)
         
     async def get_filled_order_info(self, order_id: str) -> Optional[OrderInfo]:
         """Get order information from Lighter using official SDK."""

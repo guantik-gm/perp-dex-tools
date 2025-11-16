@@ -639,6 +639,13 @@ class EdgeXClient(BaseExchangeClient):
         # unrealizePnl, termRealizePnl
         return Decimal(position["positionValue"])
 
+    async def get_ticker_position_size(self) -> Decimal:
+        position = await self.get_ticker_position()
+        if position is None:
+            raise ValueError("No position found for position")
+        # unrealizePnl, termRealizePnl
+        return Decimal(Decimal(position["positionValue"]) / Decimal(position["avgEntryPrice"]))
+
     @query_retry(default_return=Decimal('0'))
     async def get_funding_rate(self, contract_id: str) -> Decimal:
         """获取资金费率 - 对冲模式专用，自动转换为1小时费率"""

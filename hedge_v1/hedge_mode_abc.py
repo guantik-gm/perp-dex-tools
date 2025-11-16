@@ -913,15 +913,30 @@ class HedgeBotAbc(ABC):
         return success, False  # 返回成功状态，不需要重试策略
 
 
-    def _determine_close_side_and_quantity(self) -> tuple:
+    def _determine_close_side_and_quantity(self, primary_position_size) -> tuple:
         """确定平仓方向和数量，返回(side, quantity)或(None, None)表示不需要平仓"""
         # todo: lighter没平也要检查
-        if self.position_data.current_primary_position == 0:
+        # if self.position_data.current_primary_position == 0:
+        #     return None, None
+        # elif self.position_data.current_primary_position > 0:
+        #     return 'sell', abs(self.position_data.current_primary_position)
+        # else:
+        #     return 'buy', abs(self.position_data.current_primary_position)
+        if primary_position_size == 0:
             return None, None
-        elif self.position_data.current_primary_position > 0:
-            return 'sell', abs(self.position_data.current_primary_position)
+        elif primary_position_size > 0:
+            return 'sell', abs(primary_position_size)
         else:
-            return 'buy', abs(self.position_data.current_primary_position)
+            return 'buy', abs(primary_position_size)
+    
+    def _get_current_position_size_from_exchange(self):
+        try:
+            primary_position_size = self.primary_client.get_ticker_position_size()
+            lighter_position_size = self.lighter.get_ticker_position_size()
+        except Exception as e:
+            self.logger.info(f"get position size from exchange api error: {e}")
+            return self.position_data.current_primary_position, self.position_data.current_lighter_position
+        return primary_position_size, lighter_position_size
     
     async def trading_loop(self):
         """Main trading loop implementing the new strategy."""
@@ -945,10 +960,14 @@ class HedgeBotAbc(ABC):
                 self.logger.error(f"lighter's order book not ready, wait for order book data to continue")
                 await asyncio.sleep(10)
             
-            self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.position_data.current_primary_position} | Lighter position: {self.position_data.current_lighter_position}")
+            primary_position_size, lighter_position_size = self._get_current_position_size_from_exchange()
+            self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
 
-            if abs(self.position_data.current_primary_position + self.position_data.current_lighter_position) > self.order_quantity * 2:
-                self.logger.error(f"❌ Position diff is too large: {self.position_data.current_primary_position + self.position_data.current_lighter_position}")
+            # if abs(self.position_data.current_primary_position + self.position_data.current_lighter_position) > self.order_quantity * 2:
+            #     self.logger.error(f"❌ Position diff is too large: {self.position_data.current_primary_position + self.position_data.current_lighter_position}")
+            #     break
+            if abs(primary_position_size + lighter_position_size) > self.order_quantity * 2:
+                self.logger.error(f"❌ Position diff is too large: {primary_position_size + lighter_position_size}")
                 break
 
             open_side = 'buy'  # 默认值
@@ -1017,14 +1036,17 @@ class HedgeBotAbc(ABC):
             
 
             # Step 2: 第一次平仓（添加重试逻辑）
-            self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.position_data.current_primary_position} | Lighter position: {self.position_data.current_lighter_position}")
+            primary_position_size, lighter_position_size = self._get_current_position_size_from_exchange()
+            self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
             
             # 检查对冲状态：两个交易所仓位总和应该接近零（允许小误差）
-            position_sum = self.position_data.current_primary_position + self.position_data.current_lighter_position
+            # position_sum = self.position_data.current_primary_position + self.position_data.current_lighter_position
+            position_sum = primary_position_size + lighter_position_size
             position_tolerance = self.order_quantity * Decimal('0.005')  # 允许0.5%的误差
             
             if abs(position_sum) > position_tolerance:
-                error_msg = f"Position not properly hedged! {self.primary_exchange_name()}: {self.position_data.current_primary_position}, Lighter: {self.position_data.current_lighter_position}, Sum: {position_sum} (tolerance: ±{position_tolerance})"
+                # error_msg = f"Position not properly hedged! {self.primary_exchange_name()}: {self.position_data.current_primary_position}, Lighter: {self.position_data.current_lighter_position}, Sum: {position_sum} (tolerance: ±{position_tolerance})"
+                error_msg = f"Position not properly hedged! {self.primary_exchange_name()}: {primary_position_size}, Lighter: {lighter_position_size}, Sum: {position_sum} (tolerance: ±{position_tolerance})"
                 self.logger.error(error_msg)
                 await self.monitor.send_error_notification(error=None, context=error_msg)
                 break
@@ -1061,7 +1083,8 @@ class HedgeBotAbc(ABC):
                 strategy.after_close_hedge_position(self)
 
             # Step 3: 剩余平仓(无需重试策略)
-            self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.position_data.current_primary_position} | Lighter position: {self.position_data.current_lighter_position}")
+            primary_position_size, lighter_position_size = self._get_current_position_size_from_exchange()
+            self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
             final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
             if final_close_side:
                 success = False
@@ -1143,21 +1166,22 @@ class HedgeBotAbc(ABC):
         """计算 Primary 交易所的 PnL（包含手续费）"""
         # 计算手续费
         primary_open_fee, primary_close_fee = self.position_data.calc_primary_fee_cost(self.primary_fee_rate())
-        primary_pnl = None
-        try:
-            # 优先尝试通过交易所 API 获取 PnL
-            if self.primary_client:
-                primary_pnl = await self.primary_client.get_ticker_position_pnl()
-                primary_pnl = primary_pnl / Decimal(100)
-                self.logger.info(f"✅ {self.primary_exchange_name()} PnL from API: {primary_pnl}")
-        except Exception as e:
-            self.logger.warning(f"⚠️ 无法获取 Primary PnL from API: {e}")
+        # primary_pnl = None
+        # try:
+        #     # 优先尝试通过交易所 API 获取 PnL
+        #     if self.primary_client:
+        #         primary_pnl = await self.primary_client.get_ticker_position_pnl()
+        #         primary_pnl = primary_pnl / Decimal(100)
+        #         self.logger.info(f"✅ {self.primary_exchange_name()} PnL from API: {primary_pnl}")
+        # except Exception as e:
+        #     self.logger.warning(f"⚠️ 无法获取 Primary PnL from API: {e}")
        
-        if not primary_pnl: 
-            # 如果 API 获取失败，使用订单价格计算
-            self.logger.info(f"获取 {self.primary_exchange_name()} PnL 数据失败，使用订单价格进行计算")
-            primary_pnl = self.position_data.calc_primary_pnl()
-        
+        # if not primary_pnl: 
+        #     # 如果 API 获取失败，使用订单价格计算
+        #     self.logger.info(f"获取 {self.primary_exchange_name()} PnL 数据失败，使用订单价格进行计算")
+        #     primary_pnl = self.position_data.calc_primary_pnl()
+        # todo: 交易所api返回的pnl有时候不太准确，先用本地计算的方式
+        primary_pnl = self.position_data.calc_primary_pnl()
         # 从PnL中减去总手续费
         primary_pnl -= (primary_open_fee + primary_close_fee)
         
@@ -1165,19 +1189,20 @@ class HedgeBotAbc(ABC):
 
     async def _combine_lighter_pnl(self) -> Optional[Decimal]:
         """计算 Lighter 交易所的 PnL"""
-        lighter_pnl = None
-        try:
-            # 优先尝试通过 lighter proxy 获取 PnL
-            if self.lighter:
-                lighter_pnl = await self.lighter.get_ticker_position_pnl()
-                lighter_pnl = lighter_pnl / Decimal(100)
-                self.logger.info(f"✅ Lighter PnL from API: {lighter_pnl}")
-        except Exception as e:
-            self.logger.warning(f"⚠️ 无法获取 Lighter PnL from API: {e}")
+        # lighter_pnl = None
+        # try:
+        #     # 优先尝试通过 lighter proxy 获取 PnL
+        #     if self.lighter:
+        #         lighter_pnl = await self.lighter.get_ticker_position_pnl()
+        #         lighter_pnl = lighter_pnl / Decimal(100)
+        #         self.logger.info(f"✅ Lighter PnL from API: {lighter_pnl}")
+        # except Exception as e:
+        #     self.logger.warning(f"⚠️ 无法获取 Lighter PnL from API: {e}")
         
-        if not lighter_pnl: 
-            self.logger.info(f"获取 Lighter PnL 数据失败，使用订单价格进行计算")
-            lighter_pnl = self.position_data.calc_lighter_pnl()
+        # if not lighter_pnl: 
+        #     self.logger.info(f"获取 Lighter PnL 数据失败，使用订单价格进行计算")
+        #     lighter_pnl = self.position_data.calc_lighter_pnl()
+        lighter_pnl = self.position_data.calc_lighter_pnl()
         return lighter_pnl
 
     async def _update_pnl_data_after_close(self):
