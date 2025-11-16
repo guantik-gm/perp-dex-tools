@@ -1089,7 +1089,7 @@ class HedgeBotAbc(ABC):
             # Step 3: 剩余平仓(无需重试策略)
             primary_position_size, lighter_position_size = await self._get_current_position_size_from_exchange()
             self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
-            final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
+            final_close_side, final_close_quantity = self._determine_close_side_and_quantity(primary_position_size)
             if final_close_side:
                 success = False
                 for retry_count in range(max_retries):
