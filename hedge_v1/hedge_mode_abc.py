@@ -929,10 +929,10 @@ class HedgeBotAbc(ABC):
         else:
             return 'buy', abs(primary_position_size)
     
-    def _get_current_position_size_from_exchange(self):
+    async def _get_current_position_size_from_exchange(self):
         try:
-            primary_position_size = self.primary_client.get_ticker_position_size()
-            lighter_position_size = self.lighter.get_ticker_position_size()
+            primary_position_size = await self.primary_client.get_ticker_position_size()
+            lighter_position_size = await self.lighter.get_ticker_position_size()
         except Exception as e:
             self.logger.info(f"get position size from exchange api error: {e}")
             return self.position_data.current_primary_position, self.position_data.current_lighter_position
@@ -960,7 +960,7 @@ class HedgeBotAbc(ABC):
                 self.logger.error(f"lighter's order book not ready, wait for order book data to continue")
                 await asyncio.sleep(10)
             
-            primary_position_size, lighter_position_size = self._get_current_position_size_from_exchange()
+            primary_position_size, lighter_position_size = await self._get_current_position_size_from_exchange()
             self.logger.info(f"[STEP 1] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
 
             # if abs(self.position_data.current_primary_position + self.position_data.current_lighter_position) > self.order_quantity * 2:
@@ -1036,7 +1036,7 @@ class HedgeBotAbc(ABC):
             
 
             # Step 2: 第一次平仓（添加重试逻辑）
-            primary_position_size, lighter_position_size = self._get_current_position_size_from_exchange()
+            primary_position_size, lighter_position_size = await self._get_current_position_size_from_exchange()
             self.logger.info(f"[STEP 2] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
             
             # 检查对冲状态：两个交易所仓位总和应该接近零（允许小误差）
@@ -1083,7 +1083,7 @@ class HedgeBotAbc(ABC):
                 strategy.after_close_hedge_position(self)
 
             # Step 3: 剩余平仓(无需重试策略)
-            primary_position_size, lighter_position_size = self._get_current_position_size_from_exchange()
+            primary_position_size, lighter_position_size = await self._get_current_position_size_from_exchange()
             self.logger.info(f"[STEP 3] {self.primary_exchange_name()} position: {self.position_data.current_primary_position}({primary_position_size}) | Lighter position: {self.position_data.current_lighter_position}({lighter_position_size})")
             final_close_side, final_close_quantity = self._determine_close_side_and_quantity()
             if final_close_side:
