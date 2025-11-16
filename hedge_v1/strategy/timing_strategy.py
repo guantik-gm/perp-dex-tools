@@ -71,15 +71,14 @@ class TimingStrategy(HedgeStrategy):
             reason = f"[时间策略] 未触发, 下次平仓时间: {self._format_time(self.next_close_time)}"
             strategy_result = HedgeStrategyResult.REJECT
             
+            current_wait_min = (time.time() - self.position_open_time) / 60 if self.position_open_time else None
             # 强制平仓检查：只在有持仓时检查
-            if self.position_open_time is not None:
-                current_wait_min = (time.time() - self.position_open_time) / 60 
-                if current_wait_min > self.max_wait_min:
-                    reason = f"⏰ 时间维度满足: 持仓时间 {current_wait_min:.1f} 分钟，超过最大时间 {self.max_wait_min} 分钟，强制关闭"
-                    strategy_result = HedgeStrategyResult.TRIGGER
-            
+            if current_wait_min and current_wait_min > self.max_wait_min:
+                reason = f"⏰ 时间维度满足: 持仓时间 {current_wait_min:.1f} 分钟，超过最大时间 {self.max_wait_min} 分钟，强制关闭"
+                strategy_result = HedgeStrategyResult.TRIGGER
+                self._reset_close_decision_time()
             # 常规平仓时间检查
-            if self.can_close_by_time():
+            elif self.can_close_by_time():
                 reason = f"⏰ 时间维度满足：到达预定平仓时间: {self._format_time(self.next_close_time)}"
                 strategy_result = HedgeStrategyResult.PASS
 
