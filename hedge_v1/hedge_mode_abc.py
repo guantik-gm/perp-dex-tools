@@ -930,12 +930,8 @@ class HedgeBotAbc(ABC):
             return 'buy', abs(primary_position_size)
     
     async def _get_current_position_size_from_exchange(self):
-        try:
-            primary_position_size = await self.primary_client.get_ticker_position_size()
-            lighter_position_size = await self.lighter.get_ticker_position_size()
-        except Exception as e:
-            self.logger.info(f"get position size from exchange api error: {e}")
-            return self.position_data.current_primary_position, self.position_data.current_lighter_position
+        primary_position_size = await self.primary_client.get_ticker_position_size()
+        lighter_position_size = await self.lighter.get_ticker_position_size()
         return primary_position_size, lighter_position_size
     
     async def trading_loop(self):
