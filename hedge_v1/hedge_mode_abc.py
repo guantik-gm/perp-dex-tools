@@ -938,6 +938,8 @@ class HedgeBotAbc(ABC):
         if lighter_position_size is None:
             lighter_position_size = self.position_data.current_lighter_position
             self.logger.warn(f"get position size error from Lighter, use position_data.current_lighter_position")
+        # ligher返回的position_size不区分方向
+        lighter_position_size = -lighter_position_size if self.position_data.current_lighter_open_side == "sell" else lighter_position_size
         return primary_position_size, lighter_position_size
     
     async def trading_loop(self):
