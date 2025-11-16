@@ -644,7 +644,8 @@ class EdgeXClient(BaseExchangeClient):
         if position is None:
             raise ValueError("No position found for position")
         # unrealizePnl, termRealizePnl
-        return Decimal(Decimal(position["positionValue"]) / Decimal(position["avgEntryPrice"]))
+        size = Decimal(position["positionValue"]) / Decimal(position["avgEntryPrice"])
+        return size.quantize(Decimal('0.00001'))
 
     @query_retry(default_return=Decimal('0'))
     async def get_funding_rate(self, contract_id: str) -> Decimal:
