@@ -271,29 +271,12 @@ class SpreadPnlStrategy(SpreadStrategy):
                 base_msg.append(f"[Lighter] 预计平仓价: {lighter_close_exec_price}, 实际平仓价: {self.lighter_close_price}, 滑点: {lighter_close_slippage}, 滑点率: {lighter_close_slippage_rate:.6f}%")
             
             # 使用position_data中的实际成交价重新计算PnL
-            actual_primary_pnl = self._calculate_side_pnl(
-                self.primary_open_price,
-                self.primary_close_price,
-                self.position_data.current_primary_open_side,
-                self.position_data.current_primary_open_quantity
-            )
-            
-            actual_lighter_pnl = self._calculate_side_pnl(
-                self.lighter_open_price,
-                self.lighter_close_price,
-                self.position_data.current_lighter_open_side,
-                self.position_data.current_lighter_open_quantity
-            )
-            
-            actual_close_fee = data['close_fee']
-            
-            predicted_primary_net = data['primary_pnl'] - data['close_fee']
-            actual_primary_net = actual_primary_pnl - actual_close_fee
-            actual_total_pnl = actual_primary_pnl + actual_lighter_pnl - actual_close_fee
+            actual_primary_pnl = self.position_data.current_primary_pnl
+            actual_lighter_pnl = self.position_data.current_lighter_pnl
+            actual_total_pnl = actual_primary_pnl + actual_lighter_pnl
             
             # Primary PnL比较
-            base_msg.append(f"[Primary] 预计PnL: {predicted_primary_net:.6f}({data['primary_pnl']:.6f}-{data['close_fee']:.6f}), 实际PnL: {actual_primary_net:.6f}({actual_primary_pnl:.6f}-{actual_close_fee:.6f})")
-            
+            base_msg.append(f"[Primary] 预计PnL: {data['primary_pnl'] - data['close_fee']:.6f}, 实际PnL: {actual_primary_pnl:.6f}")
             # Lighter PnL比较
             base_msg.append(f"[Lighter] 预计PnL: {data['lighter_pnl']:.6f}, 实际PnL: {actual_lighter_pnl:.6f}")
             
