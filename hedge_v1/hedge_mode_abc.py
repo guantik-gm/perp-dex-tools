@@ -1162,7 +1162,8 @@ class HedgeBotAbc(ABC):
             self.logger.info("🔄 Cleaning up...")
             
             # 发送系统停止通知
-            await self.monitor.send_shutdown_notification(self.position_data.current_primary_position, self.position_data.current_lighter_position)
+            primary_position_size, lighter_position_size = await self._get_current_position_size_from_exchange()
+            await self.monitor.send_shutdown_notification(primary_position_size, lighter_position_size)
                 
             self.shutdown()
 
