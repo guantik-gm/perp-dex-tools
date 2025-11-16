@@ -747,6 +747,11 @@ class HedgeBotAbc(ABC):
                             # 取消成功的场景下，有可能时间差的原因，ws又返回了FILLED的状态，实际已经成交，这种情况下需要返回开仓成功
                             if self.primary_order_status == "FILLED":
                                 return HedgeOrderResult.SUCCESS
+                            elif self.primary_order_status == "PARTIALLY_FILLED":
+                                # 在取消订单接口执行前ws接口又更新了部分填充的信息，需要更新filled_size
+                                order_info = await self.get_order_info(order_id)
+                                self.logger.info(f"get primary_order_status: {self.primary_order_status}, probably updated by websocket, replace filled size from {cancel_result.filled_size}(before cancel order) to {order_info.filled_size}(after cancel order)")
+                                cancel_result.filled_size = order_info.filled_size
                             # 真实场景下，取消成功后也有可能是部分成交了
                             if cancel_result.status == 'FILLED' or cancel_result.filled_size > 0:
                                     self.logger.info(f"订单取消成功，但订单已全部或部分成交: {cancel_result.filled_size}, 重置 {self.primary_exchange_name()} 订单状态为 FILLED")
